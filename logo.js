@@ -56,36 +56,9 @@ function removeLogo(card) {
 }
 
 /**
- * Handles the logo click event.
- * @param {HTMLElement} card
- */
-function handleLogoClick(card) {
-  // Extract data from the card
-  const data = {
-    // Add your data extraction logic here
-    timestamp: new Date().toISOString(),
-    environment: window.CONFIG.ENV
-  };
-
-  console.log(`Sending data to ${window.CONFIG.ENV} environment:`, data);
-  
-  // Send data to the configured API endpoint
-  fetch(window.CONFIG.API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(data)
-  })
-  .then(response => response.json())
-  .then(result => console.log('Success:', result))
-  .catch(error => console.error('Error:', error));
-}
-
-/**
  * Adds the logo to the job card.
  * @param {HTMLElement} card
  */
 window.addLogoToJobCard = function(card) {
-  attachLogo(card, handleLogoClick);
+  attachLogo(card, window.handleLogoClick);
 };
