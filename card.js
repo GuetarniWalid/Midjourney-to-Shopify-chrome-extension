@@ -57,3 +57,57 @@ window.addLoader = (card) => {
 window.removeLoader = (loader) => {
     loader.remove();
 }
+
+window.addSuccessMessage = (card, message) => {
+    const successMessage = document.createElement('div');
+    successMessage.style.position = 'absolute';
+    successMessage.style.top = '0';
+    successMessage.style.left = '0';
+    successMessage.style.width = '100%';
+    successMessage.style.height = '100%';
+    successMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    successMessage.style.zIndex = '1000';
+    successMessage.style.display = 'flex';
+    successMessage.style.justifyContent = 'center';
+    successMessage.style.alignItems = 'center';
+    successMessage.style.color = 'white';
+    successMessage.style.fontSize = '20px';
+    successMessage.style.fontWeight = 'bold';
+    successMessage.style.textAlign = 'center';
+    successMessage.style.padding = '20px';
+    successMessage.style.backgroundColor = 'green';
+    successMessage.textContent = message;
+    successMessage.style.cursor = 'pointer';
+    successMessage.title = 'Click to remove';
+    successMessage.addEventListener('click', () => {
+        successMessage.remove();
+    });
+    card.appendChild(successMessage);
+}
+
+window.addErrorMessage = (card, message) => {
+    const errorMessage = document.createElement('div');
+    errorMessage.style.position = 'absolute';
+    errorMessage.style.top = '0';
+    errorMessage.style.left = '0';
+    errorMessage.style.width = '100%';
+    errorMessage.style.height = '100%';
+    errorMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    errorMessage.style.zIndex = '1000';
+    errorMessage.style.display = 'flex';
+    errorMessage.style.justifyContent = 'center';
+    errorMessage.style.alignItems = 'center';
+    errorMessage.style.color = 'white';
+    errorMessage.style.fontSize = '20px';
+    errorMessage.style.fontWeight = 'bold';
+    errorMessage.style.textAlign = 'center';
+    errorMessage.style.padding = '20px';
+    errorMessage.style.backgroundColor = 'red';
+    errorMessage.textContent = message;
+    errorMessage.style.cursor = 'pointer';
+    errorMessage.title = 'Click to remove';
+    errorMessage.addEventListener('click', () => {
+        errorMessage.remove();
+    });
+    card.appendChild(errorMessage);
+}

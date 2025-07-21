@@ -14,11 +14,11 @@
   "content_scripts": [
     {
       "matches": ["*://*.midjourney.com/*"],
-      "js": ["config.dev.js", "card.js", "tab.js", "event.js", "logo.js", "content.js"]
+      "js": ["config.prod.js", "card.js", "tab.js", "event.js", "logo.js", "content.js"]
     }
   ],
   "web_accessible_resources": [{
-    "resources": ["config.dev.js", "config.prod.js", "card.js", "tab.js", "event.js", "logo.js"],
+    "resources": ["config.prod.js", "card.js", "tab.js", "event.js", "logo.js"],
     "matches": ["*://*.midjourney.com/*"]
   }],
   "permissions": [

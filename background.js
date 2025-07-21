@@ -19,10 +19,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 target: { tabId: tab.id },
                 function: extractImageData,
               },
-              results => {
+              async results => {
                 if (results && results[0]) {
-                  chrome.tabs.remove(tab.id);
-                  sendResponse({ success: true, data: results[0].result });
+                  const { imageUrl, prompt, aspectRatio } = results[0].result;
+                  
+                  // Fetch the image as buffer in the background script
+                  try {
+                    const imageBuffer = await fetchImageAsBuffer(imageUrl);
+                    const base64Image = arrayBufferToBase64(imageBuffer);
+                    
+                    chrome.tabs.remove(tab.id);
+                    sendResponse({ 
+                      success: true, 
+                      data: { base64Image, prompt, aspectRatio } 
+                    });
+                  } catch (error) {
+                    chrome.tabs.remove(tab.id);
+                    sendResponse({ 
+                      success: false, 
+                      error: error.message 
+                    });
+                  }
                 }
               }
             );
@@ -37,7 +54,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 /**
  * Extracts the image data from the opened page
- * @returns {Object} The image data { imageUrl, prompt }
+ * @returns {Object} The image data { imageUrl, prompt, aspectRatio }
  */
 function extractImageData() {
   const imageUrl = extractBigImageUrl();
@@ -85,3 +102,37 @@ function extractImageData() {
         return aspectRatio
       }
 }
+
+/**
+ * Fetches an image URL and converts it to a buffer
+ * @param {string} imageUrl - The URL of the image to fetch
+ * @returns {Promise<ArrayBuffer>} The image as an ArrayBuffer
+ */
+async function fetchImageAsBuffer(imageUrl) {
+  try {
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    return arrayBuffer;
+  } catch (error) {
+    console.error('Error fetching image as buffer:', error);
+    throw error;
+  }
+}
+/**
+ * Converts an ArrayBuffer to a base64 string
+ * @param {ArrayBuffer} buffer - The buffer to convert
+ * @returns {string} The base64 string
+ */
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+

@@ -14,6 +14,7 @@ window.openTab = (link, callback) => {
       url: link,
     },
     response => {
+      console.log('🚀 ~ response:', response)
       if (chrome.runtime.lastError) {
         console.error('Error opening tab:', chrome.runtime.lastError);
         return;
