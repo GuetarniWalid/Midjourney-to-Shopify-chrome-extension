@@ -1,138 +1,223 @@
-// Listen for messages from content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'openTab') {
-    chrome.tabs.create(
-      {
-        url: request.url,
-        active: false,
-      },
-      tab => {
-        // Listen for the tab to complete loading
-        chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
-          if (tabId === tab.id && info.status === 'complete') {
-            // Remove the listener once we're done with it
-            chrome.tabs.onUpdated.removeListener(listener);
+  if (request.action !== 'openTab') {
+    return; // Let other messages be handled elsewhere
+  }
 
-            // Execute script in the new tab to get the image data
-            chrome.scripting.executeScript(
-              {
-                target: { tabId: tab.id },
-                function: extractImageData,
-              },
-              async results => {
-                if (results && results[0]) {
-                  const { imageUrl, prompt, aspectRatio } = results[0].result;
-                  
-                  // Fetch the image as buffer in the background script
-                  try {
-                    const imageBuffer = await fetchImageAsBuffer(imageUrl);
-                    const base64Image = arrayBufferToBase64(imageBuffer);
-                    
-                    chrome.tabs.remove(tab.id);
-                    sendResponse({ 
-                      success: true, 
-                      data: { base64Image, prompt, aspectRatio } 
-                    });
-                  } catch (error) {
-                    chrome.tabs.remove(tab.id);
-                    sendResponse({ 
-                      success: false, 
-                      error: error.message 
-                    });
-                  }
-                }
-              }
-            );
-          }
-        });
+  // --- Configurable parameters via request.* if needed ---
+  const masterTimeoutMs = request.timeoutMs || 30000; // Total timeout to avoid keeping tab open indefinitely
+  const extractTimeoutMs = request.extractTimeoutMs || 20000; // Maximum wait time in page for image to appear
+
+  let replied = false; // Ensure we only respond once
+  let createdTabId = null; // ID of the tab we create
+
+  // Safe response (unique) + cleanup of global timeout
+  function safeRespond(success, payload) {
+    if (replied) return;
+    replied = true;
+    clearTimeout(masterTimer);
+    try {
+      if (success) {
+        sendResponse({ success: true, data: payload });
+      } else {
+        const msg = typeof payload === 'string' ? payload : payload?.message || 'Unknown error';
+        sendResponse({ success: false, error: msg });
+      }
+    } catch (e) {
+      // no-op
+    }
+  }
+
+  // Cleanup: remove listener and close tab
+  function cleanup() {
+    try {
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+    } catch {}
+    if (createdTabId != null) {
+      try {
+        chrome.tabs.remove(createdTabId);
+      } catch {}
+    }
+  }
+
+  // Global timeout to avoid keeping service worker open indefinitely
+  const masterTimer = setTimeout(() => {
+    if (replied) return;
+    cleanup();
+    safeRespond(false, 'Timeout while waiting for page/image');
+  }, masterTimeoutMs);
+
+  // Main handler: triggered on each "complete" or URL change
+  function onUpdated(tabId, changeInfo, tab) {
+    if (tabId !== createdTabId) return;
+
+    // Trigger on "complete" or when URL changes (useful for SPA/redirect)
+    const shouldTry = changeInfo.status === 'complete' || typeof changeInfo.url === 'string';
+
+    if (!shouldTry) return;
+
+    // Sometimes tab.url here is stale → get current state
+    chrome.tabs.get(createdTabId, current => {
+      if (chrome.runtime.lastError || !current) return;
+      tryExtract(current);
+    });
+  }
+
+  // Try to extract (called after complete / URL change)
+  function tryExtract(currentTab) {
+    if (replied) return;
+
+    const url = currentTab?.url || '';
+    // Avoid targeting auth/intermediate pages
+    const isMidjourney = /https?:\/\/([^/]+\.)?midjourney\.com/i.test(url);
+    if (!isMidjourney) {
+      // Wait for next onUpdated event (e.g., post-login redirect)
+      return;
+    }
+
+    chrome.scripting.executeScript(
+      {
+                 target: { tabId: createdTabId /* , allFrames: true if image is rendered in a same-domain iframe */ },
+        func: waitAndExtractImageData,
+        args: [{ timeout: extractTimeoutMs }],
+                 world: 'ISOLATED', // default value; switch to 'MAIN' if need to access page context
+      },
+      async results => {
+        if (replied) return;
+
+        if (chrome.runtime.lastError) {
+          // Page might not be ready; wait for next event
+          console.debug('[bg] executeScript error:', chrome.runtime.lastError.message);
+          return;
+        }
+
+        const res = results && results[0] && results[0].result;
+        if (!res) {
+          // Extraction not ready → keep listener for next attempt
+          return;
+        }
+
+        // Success: remove listener, close tab after fetch, then respond
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+
+        try {
+          const { imageUrl, prompt, aspectRatio } = res;
+          const imageBuffer = await fetchImageAsBuffer(imageUrl);
+          const base64Image = arrayBufferToBase64(imageBuffer);
+
+          cleanup(); // close the tab
+          safeRespond(true, { base64Image, prompt, aspectRatio });
+        } catch (e) {
+          cleanup();
+          safeRespond(false, e);
+        }
       }
     );
-    // Return true to indicate we will send a response asynchronously
-    return true;
   }
+
+  // Create tab + attach listener
+  chrome.tabs.create({ url: request.url, active: false }, tab => {
+    if (chrome.runtime.lastError || !tab) {
+      safeRespond(false, 'Failed to create tab: ' + (chrome.runtime.lastError?.message || 'unknown'));
+      return;
+    }
+    createdTabId = tab.id;
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    // Try once in case page is already ready very quickly
+    chrome.tabs.get(createdTabId, current => {
+      if (chrome.runtime.lastError || !current) return;
+      tryExtract(current);
+    });
+  });
+
+  // IMPORTANT: keep the asynchronous response channel open
+  return true;
 });
 
 /**
- * Extracts the image data from the opened page
- * @returns {Object} The image data { imageUrl, prompt, aspectRatio }
+ * Function injected into the page: waits for a "real" image to appear
+ * and returns { imageUrl, prompt, aspectRatio }.
+ * Uses MutationObserver + timeout.
  */
-function extractImageData() {
-  const imageUrl = extractBigImageUrl();
-  const prompt = extractImagePrompt();
-  const aspectRatio = extractImageAspectRatio();
-  return { imageUrl, prompt, aspectRatio };
+function waitAndExtractImageData({ timeout = 20000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + timeout;
 
-  /**
-   * Extracts the big image url from the opened page
-   * @returns {string} The big image url
-   */
-  function extractBigImageUrl() {
-    const imageElement = document.querySelector('img + img[draggable=true]');
-    const imageUrl = imageElement.src;
-    if (!imageElement) throw new Error('Image element not found');
+         const pick = () => {
+       // Avoid spinners/small logos: take a sufficiently large image
+       const imgs = Array.from(document.images).filter(i => i.src && i.naturalWidth >= 256 && i.naturalHeight >= 256);
 
-    return imageUrl;
-  }
+       if (imgs.length) {
+         const img = imgs[0];
+         const imageUrl = img.currentSrc || img.src;
 
-  /**
-   * Extracts the prompt from the opened page
-   * @returns {string} The image prompt
-   */
-  function extractImagePrompt() {
-    const promptElement = document.querySelector('p:not(.relative)');
-    if (!promptElement) throw new Error('Prompt element not found');
+         // Prompt: same logic as your code, with fallback if too short
+         let prompt = '';
+         const pCandidates = Array.from(document.querySelectorAll('p')).filter(p => !p.classList.contains('relative'));
+         if (pCandidates.length) {
+           prompt = (pCandidates[0].textContent || '').trim();
+         }
+         if (!prompt || prompt.length < 10) {
+           const alt = (img.getAttribute('alt') || '').trim();
+           if (alt.length >= 10) prompt = alt;
+         }
 
-    const prompt = promptElement.textContent;
-    const promptSize = prompt.length;
-    if (promptSize < 10) throw new Error('Prompt is too short');
+         // Aspect ratio: same logic as your code
+         const buttons = document.querySelectorAll('button[title]');
+         const aspectRatioButton = Array.from(buttons).find(b => (b.title || '').toLowerCase().includes('ratio'));
+         const aspectRatioElem = aspectRatioButton?.querySelector('span');
+         const aspectRatioString = aspectRatioElem?.textContent || '';
+         const aspectRatio = aspectRatioString.split(' ')[1] || null;
 
-    return prompt;
-  }
-
-    /**
-   * Extracts the prompt from the opened page
-   * @returns {string} The image prompt
-   */
-    function extractImageAspectRatio() {
-        const buttons = document.querySelectorAll('button[title]')
-        const aspectRatioButton = Array.from(buttons).find(button => button.title.includes('ratio'))
-        const aspectRatioElem = aspectRatioButton?.querySelector('span')
-        const aspectRatioString = aspectRatioElem?.textContent
-        const aspectRatio = aspectRatioString?.split(' ')[1]
-        return aspectRatio
+        resolve({ imageUrl, prompt, aspectRatio });
+        return true;
       }
+      return false;
+    };
+
+    if (pick()) return;
+
+    const mo = new MutationObserver(() => {
+      if (pick()) {
+        try {
+          mo.disconnect();
+        } catch {}
+      }
+    });
+    mo.observe(document, { childList: true, subtree: true, attributes: true });
+
+    const timer = setInterval(() => {
+      if (Date.now() > deadline) {
+        try {
+          mo.disconnect();
+        } catch {}
+        clearInterval(timer);
+        reject(new Error('Timeout waiting for image'));
+      }
+    }, 250);
+  });
 }
 
 /**
- * Fetches an image URL and converts it to a buffer
- * @param {string} imageUrl - The URL of the image to fetch
- * @returns {Promise<ArrayBuffer>} The image as an ArrayBuffer
+ * Fetches an image and returns it as an ArrayBuffer.
  */
 async function fetchImageAsBuffer(imageUrl) {
-  try {
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
-    }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    return arrayBuffer;
-  } catch (error) {
-    console.error('Error fetching image as buffer:', error);
-    throw error;
+  const response = await fetch(imageUrl, { credentials: 'omit' });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
   }
+  return await response.arrayBuffer();
 }
+
 /**
- * Converts an ArrayBuffer to a base64 string
- * @param {ArrayBuffer} buffer - The buffer to convert
- * @returns {string} The base64 string
+ * Converts an ArrayBuffer to base64.
  */
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
   let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
+     const chunkSize = 0x8000; // avoid strings that are too long at once
+  for (let i = 0; i < bytes.byteLength; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk);
   }
   return btoa(binary);
 }
-

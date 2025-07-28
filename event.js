@@ -23,7 +23,7 @@ window.handleLogoClick = card => {
     } finally {
       window.removeLoader(loader);
       if (result?.success) {
-        window.addSuccessMessage(card, result.data || 'Fiche créée avec succès');
+        window.addSuccessMessage(card, 'Fiche créée avec succès');
       } else {
         window.addErrorMessage(card, result?.message || 'Une erreur est survenue');
       }
