@@ -8,17 +8,14 @@
     "48": "images/icon48.png",
     "128": "images/icon128.png"
   },
-  "background": {
-    "service_worker": "background.js"
-  },
   "content_scripts": [
     {
       "matches": ["*://*.midjourney.com/*"],
-      "js": ["config.prod.js", "card.js", "tab.js", "event.js", "logo.js", "content.js"]
+      "js": ["config.dev.js", "card.js", "event.js", "logo.js", "content.js"]
     }
   ],
   "web_accessible_resources": [{
-    "resources": ["config.prod.js", "card.js", "tab.js", "event.js", "logo.js"],
+    "resources": ["config.dev.js", "card.js", "event.js", "logo.js"],
     "matches": ["*://*.midjourney.com/*"]
   }],
   "permissions": [

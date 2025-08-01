@@ -44,6 +44,16 @@ function attachLogo(card, onClick) {
 
   card.addEventListener('mouseover', showLogo);
   card.addEventListener('mouseout', hideLogo);
+  
+  // Check if mouse is already over the card when we attach the logo
+  const rect = card.getBoundingClientRect();
+  const mouseX = window.mouseX || 0; // We'll need to track mouse position
+  const mouseY = window.mouseY || 0;
+  
+  if (mouseX >= rect.left && mouseX <= rect.right && 
+      mouseY >= rect.top && mouseY <= rect.bottom) {
+    showLogo();
+  }
 }
 
 /**

@@ -1,11 +1,24 @@
-window.extractCardData = function(card) {
-    const link = getLinkToBigSizeImage(card);
-    return { link };
-}
-
 function getLinkToBigSizeImage(card) {
-    const image = card.querySelector('a');
-    return image.href;
+    // Get the first image in the card
+    const img = card.querySelector('img');
+    if (!img || !img.src) {
+        console.error('No image found in card');
+        return null;
+    }
+
+    // Extract jobId and index from image src
+    const src = img.src;
+    const urlParts = src.split('/');
+    const jobId = urlParts[3]; // After https://cdn.midjourney.com/
+    
+    // Extract index (after 0_)
+    const filename = urlParts[4]; // 0_0_384_N.webp?method=shortest&qst=6&quality=15
+    const indexMatch = filename.match(/0_(\d+)/);
+    const index = indexMatch ? indexMatch[1] : '0';
+    
+    const link = `https://cdn.midjourney.com/${jobId}/0_${index}.png`;
+    
+    return link;
 }
 
 window.addLoader = (card) => {
