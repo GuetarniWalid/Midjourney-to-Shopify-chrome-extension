@@ -40,8 +40,8 @@ function extractPageData() {
 
   // Extract aspect ratio
   let aspectRatio = null;
-  const buttons = document.querySelectorAll('button[title]');
-  const aspectRatioButton = Array.from(buttons).find(b => (b.title || '').toLowerCase().includes('ratio'));
+  const versionButton = document.querySelector('button[title="Version"]');
+  const aspectRatioButton = versionButton.previousElementSibling;
   if (aspectRatioButton) {
     const aspectRatioElem = aspectRatioButton.querySelector('span');
     const aspectRatioString = aspectRatioElem?.textContent || '';
