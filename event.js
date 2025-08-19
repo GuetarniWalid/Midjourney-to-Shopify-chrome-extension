@@ -41,7 +41,9 @@ function extractPageData() {
   // Extract aspect ratio
   let aspectRatio = null;
   const versionButton = document.querySelector('button[title="Version"]');
-  const aspectRatioButton = versionButton.previousElementSibling;
+  const parent = versionButton.parentElement;
+  const allButtons = Array.from(parent.querySelectorAll('button'));
+  const aspectRatioButton = allButtons.find(button => button.textContent.includes('ar'));
   if (aspectRatioButton) {
     const aspectRatioElem = aspectRatioButton.querySelector('span');
     const aspectRatioString = aspectRatioElem?.textContent || '';
