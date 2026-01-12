@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Publier sur MyselfMonArt</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 24px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 40px 60px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    h1 {
+      font-size: 42px;
+      font-weight: 700;
+      color: white;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      letter-spacing: -0.5px;
+      margin: 0;
+    }
+
+    .content {
+      padding: 60px;
+    }
+
+    .image-preview {
+      width: 100%;
+      max-height: 600px;
+      object-fit: contain;
+      border-radius: 12px;
+      margin-bottom: 40px;
+      background-color: #f8f9fa;
+      border: 2px solid #e9ecef;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    }
+
+    .form-group {
+      margin-bottom: 32px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      color: #2d3748;
+    }
+
+    textarea,
+    select {
+      width: 100%;
+      padding: 14px 18px;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 15px;
+      font-family: inherit;
+      transition: border-color 0.2s ease;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    textarea:focus,
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    select {
+      cursor: pointer;
+      background-color: white;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 16px;
+      margin-top: 40px;
+    }
+
+    button {
+      flex: 1;
+      padding: 16px 32px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-secondary {
+      background: #e2e8f0;
+      color: #2d3748;
+    }
+
+    .btn-secondary:hover {
+      background: #cbd5e0;
+    }
+
+    .no-image {
+      text-align: center;
+      padding: 80px 20px;
+      background: #f8f9fa;
+      border-radius: 12px;
+      margin-bottom: 40px;
+    }
+
+    .no-image svg {
+      width: 120px;
+      height: 120px;
+      margin-bottom: 20px;
+      opacity: 0.3;
+    }
+
+    .no-image p {
+      color: #999;
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Publier sur MyselfMonArt</h1>
+    </div>
+
+    <div class="content">
+      <div id="imageContainer">
+        <div class="no-image">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+          <p>Chargement de l'image...</p>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="alt-text">Texte alternatif de l'image</label>
+        <textarea
+          id="alt-text"
+          placeholder="Entrez une description de l'image..."
+        >Texte par défaut - sera généré par IA prochainement</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="category">Catégorie du produit</label>
+        <select id="category">
+          <option value="" disabled selected>Chargement des catégories...</option>
+        </select>
+      </div>
+
+      <div class="button-group">
+        <button type="button" class="btn-secondary" onclick="window.close()">Annuler</button>
+        <button type="button" class="btn-primary" id="publish-btn">Publier</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="publish.js"></script>
+</body>
+</html>

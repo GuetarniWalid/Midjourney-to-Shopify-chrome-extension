@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Midjourney to Shopify",
-  "description": "A Chrome extension to transform a Midjourney image into a Shopify product",
-  "version": "1.0.0",
+  "name": "MyselfMonArt Publisher",
+  "description": "Publier des images sur MyselfMonArt directement depuis n'importe quelle page web",
+  "version": "2.0.0",
   "icons": {
     "16": "images/icon16.png",
     "48": "images/icon48.png",
@@ -10,22 +10,33 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.midjourney.com/*"],
-      "js": ["config.prod.js", "card.js", "event.js", "logo.js", "content.js"]
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
     }
   ],
   "web_accessible_resources": [{
-    "resources": ["config.prod.js", "card.js", "event.js", "logo.js"],
-    "matches": ["*://*.midjourney.com/*"]
+    "resources": ["publish.html", "publish.js"],
+    "matches": ["<all_urls>"]
   }],
   "permissions": [
     "activeTab",
-    "contextMenus",
     "scripting",
-    "tabs"
+    "tabs",
+    "storage"
   ],
   "host_permissions": [
-    "*://*.midjourney.com/*",
-    "<all_urls>"
-  ]
+    "<all_urls>",
+    "http://localhost:3001/*"
+  ],
+  "action": {
+    "default_title": "Publier sur MyselfMonArt",
+    "default_icon": {
+      "16": "images/icon16.png",
+      "48": "images/icon48.png",
+      "128": "images/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
 } 
