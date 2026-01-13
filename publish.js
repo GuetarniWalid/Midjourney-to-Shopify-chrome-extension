@@ -23,7 +23,7 @@ let selectedMockup = null;
 let categoriesData = [];
 let currentLayout = 'square'; // Default layout: portrait, landscape, or square
 let isProcessing = false;
-let resultImageUrl = null;
+let resultImageUrls = []; // Array to store multiple generated mockups
 
 // Initialize page
 async function init() {
@@ -300,7 +300,6 @@ async function selectMockupAndGenerate(optionElement, category, subcategory) {
 
     if (response.success && response.data.success) {
       console.log('[SelectMockup] Mockup generated successfully:', response.data);
-      resultImageUrl = response.data.resultPath;
       showResultImage(response.data.resultPath);
     } else {
       console.error('[SelectMockup] Job failed:', response);
@@ -403,15 +402,11 @@ publishBtn.addEventListener('click', async () => {
   const altText = altTextInput.value.trim();
   const productType = document.querySelector('input[name="productType"]:checked').value;
 
-  if (!selectedMockup) {
-    console.warn('[Publish] No mockup selected');
-    alert('Veuillez d\'abord sélectionner et générer un mockup');
-    return;
-  }
-
-  if (!resultImageUrl) {
-    console.warn('[Publish] No generated mockup found');
-    alert('Veuillez d\'abord générer le mockup en cliquant sur une catégorie');
+  // Check if at least one mockup has been generated
+  const validMockups = resultImageUrls.filter(url => url !== null);
+  if (validMockups.length === 0) {
+    console.warn('[Publish] No generated mockups found');
+    alert('Veuillez d\'abord générer au moins un mockup en cliquant sur une catégorie');
     return;
   }
 
@@ -426,16 +421,16 @@ publishBtn.addEventListener('click', async () => {
 
   console.log('[Publish] Preparing to publish:', {
     originalImage: result.publishImage,
-    generatedMockup: resultImageUrl,
+    generatedMockups: validMockups,
+    mockupCount: validMockups.length,
     altText: altText,
-    mockup: selectedMockup,
     productType: productType,
     layout: currentLayout,
     prompt: result.publishPrompt
   });
 
   // TODO: Send to backend API
-  alert('Fonctionnalité de publication vers le backend en cours de développement\n\nDonnées prêtes:\n- Mockup: ' + selectedMockup.value + '\n- Image générée: ' + resultImageUrl + '\n- Alt text: ' + altText + '\n- Type: ' + productType);
+  alert('Fonctionnalité de publication vers le backend en cours de développement\n\nDonnées prêtes:\n- Nombre de mockups: ' + validMockups.length + '\n- Images générées: ' + validMockups.join(', ') + '\n- Alt text: ' + altText + '\n- Type: ' + productType);
 
   // For now, just show success
   console.log('[Publish] Ready to send to backend (not implemented yet)');
@@ -482,35 +477,59 @@ function hideLoadingState() {
  * Show result image
  */
 function showResultImage(imagePath) {
+  console.log('[ShowResult] Adding mockup image:', imagePath);
+
+  // Add to array
+  resultImageUrls.push(imagePath);
+  const imageIndex = resultImageUrls.length - 1;
+
   const container = document.querySelector('.mockup-selector-container');
-  container.innerHTML = `
-    <div style="position: relative; width: 300px; height: 400px;">
-      <img src="${imagePath}" alt="Mockup généré" style="width: 100%; height: 100%; object-fit: cover;" />
-      <div id="removeMockupBtn" style="position: absolute; top: 10px; right: 10px; background: white; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s ease;" onmouseover="this.style.background='#ff4444'; this.style.color='white';" onmouseout="this.style.background='white'; this.style.color='currentColor';">
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <line x1="18" y1="6" x2="6" y2="18"></line>
-          <line x1="6" y1="6" x2="18" y2="18"></line>
-        </svg>
-      </div>
+
+  // Find the add button (should be the last child)
+  const addButton = container.querySelector('.mockup-selector-btn');
+
+  // Create new mockup item
+  const mockupItem = document.createElement('div');
+  mockupItem.className = 'mockup-item';
+  mockupItem.setAttribute('data-index', imageIndex);
+  mockupItem.innerHTML = `
+    <img src="${imagePath}" alt="Mockup généré" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
+    <div class="remove-mockup-btn" data-index="${imageIndex}" style="position: absolute; top: 10px; right: 10px; background: white; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s ease;" onmouseover="this.style.background='#ff4444'; this.style.color='white';" onmouseout="this.style.background='white'; this.style.color='currentColor';">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
     </div>
   `;
 
+  // Insert before the add button
+  if (addButton) {
+    container.insertBefore(mockupItem, addButton.parentElement);
+  } else {
+    container.appendChild(mockupItem);
+  }
+
   // Attach click event to remove button
-  document.getElementById('removeMockupBtn').addEventListener('click', resetMockupSelector);
+  const removeBtn = mockupItem.querySelector('.remove-mockup-btn');
+  removeBtn.addEventListener('click', () => removeMockup(imageIndex));
+
+  console.log('[ShowResult] Mockup added, total count:', resultImageUrls.length);
 }
 
 /**
- * Reset mockup selector to original empty state
+ * Remove a specific mockup by index
  */
-async function resetMockupSelector() {
-  console.log('[ResetMockup] Resetting to original state');
+async function removeMockup(index) {
+  console.log('[RemoveMockup] Removing mockup at index:', index);
+
+  const imageUrl = resultImageUrls[index];
 
   // Delete file from server if it exists
-  if (resultImageUrl) {
+  if (imageUrl) {
     try {
       // Extract filename from URL (e.g., "http://localhost:3001/uploads/processed_job_xxx.jpg" -> "processed_job_xxx.jpg")
-      const filename = resultImageUrl.split('/').pop();
-      console.log('[ResetMockup] Deleting file from server:', filename);
+      const filename = imageUrl.split('/').pop();
+      console.log('[RemoveMockup] Deleting file from server:', filename);
 
       // Call delete endpoint via background script
       const response = await chrome.runtime.sendMessage({
@@ -519,37 +538,26 @@ async function resetMockupSelector() {
       });
 
       if (response.success) {
-        console.log('[ResetMockup] File deleted successfully');
+        console.log('[RemoveMockup] File deleted successfully');
       } else {
-        console.warn('[ResetMockup] Failed to delete file:', response.error);
+        console.warn('[RemoveMockup] Failed to delete file:', response.error);
       }
     } catch (error) {
-      console.error('[ResetMockup] Error deleting file:', error);
+      console.error('[RemoveMockup] Error deleting file:', error);
     }
   }
 
-  // Clear result image URL
-  resultImageUrl = null;
-  selectedMockup = null;
+  // Remove from array (set to null to keep indices stable)
+  resultImageUrls[index] = null;
 
-  // Restore original mockup selector button
+  // Remove from DOM
   const container = document.querySelector('.mockup-selector-container');
-  container.innerHTML = `
-    <button type="button" class="mockup-selector-btn" id="mockupSelectorBtn">
-      <div class="mockup-selector-icon">
-        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24">
-          <path fill="currentColor" d="M12 21q-.425 0-.712-.288T11 20v-7H4q-.425 0-.712-.288T3 12t.288-.712T4 11h7V4q0-.425.288-.712T12 3t.713.288T13 4v7h7q.425 0 .713.288T21 12t-.288.713T20 13h-7v7q0 .425-.288.713T12 21"/>
-        </svg>
-      </div>
-    </button>
-  `;
+  const mockupItem = container.querySelector(`.mockup-item[data-index="${index}"]`);
+  if (mockupItem) {
+    mockupItem.remove();
+  }
 
-  // Re-attach click event to open modal
-  document.getElementById('mockupSelectorBtn').addEventListener('click', () => {
-    mockupModal.classList.add('active');
-  });
-
-  console.log('[ResetMockup] Mockup selector reset complete');
+  console.log('[RemoveMockup] Mockup removed, remaining count:', resultImageUrls.filter(url => url !== null).length);
 }
 
 // Initialize on load
