@@ -485,8 +485,8 @@ function showResultImage(imagePath) {
 
   const container = document.querySelector('.mockup-selector-container');
 
-  // Find the add button (should be the last child)
-  const addButton = container.querySelector('.mockup-selector-btn');
+  // Find the add button container by ID
+  const addButtonContainer = document.getElementById('addMockupButtonContainer');
 
   // Create new mockup item
   const mockupItem = document.createElement('div');
@@ -502,9 +502,9 @@ function showResultImage(imagePath) {
     </div>
   `;
 
-  // Insert before the add button
-  if (addButton) {
-    container.insertBefore(mockupItem, addButton.parentElement);
+  // Insert before the add button container
+  if (addButtonContainer) {
+    container.insertBefore(mockupItem, addButtonContainer);
   } else {
     container.appendChild(mockupItem);
   }
