@@ -254,33 +254,12 @@ async function handleNewJob(message) {
       console.error('[Job] WebSocket not connected');
       addLog('error', 'WebSocket not connected');
     }
-
-    // Delete mockup file with short delay (file was locked from write/read)
-    if (result.tempMockupFile) {
-      setTimeout(async () => {
-        try {
-          await result.tempMockupFile.delete();
-          console.log('[Job] Deleted temp mockup file after delay');
-        } catch (err) {
-          console.warn('[Job] Could not delete temp mockup after delay:', err.message);
-        }
-      }, 500); // 500ms delay is enough for file system to release lock
-    }
   } catch (error) {
     console.error('[Job] Error occurred:', error);
     console.error('[Job] Error stack:', error.stack);
 
-    // Try to delete mockup file if it exists (with delay)
-    if (result && result.tempMockupFile) {
-      setTimeout(async () => {
-        try {
-          await result.tempMockupFile.delete();
-          console.log('[Job] Deleted temp mockup file after error');
-        } catch (err) {
-          console.warn('[Job] Could not delete temp mockup after error:', err.message);
-        }
-      }, 500);
-    }
+    // Note: Temp files in Adobe's temporary folder are auto-cleaned by the system
+    // No manual cleanup needed (files are locked anyway)
 
     // Send failure response
     if (wsClient && wsClient.isConnected()) {
@@ -396,11 +375,15 @@ async function processMockup(job) {
         console.warn('[Mockup] Could not delete temp image immediately:', err.message);
       }
 
-      // Return binary data and mockup file reference for delayed deletion
-      // (mockup file is still locked from write/read operations)
+      // Note: We don't delete the temp mockup file because:
+      // 1. It's locked from the saveAs.jpg() and read() operations
+      // 2. It's in Adobe's temporary folder which is auto-cleaned by the system
+      // 3. Manual deletion attempts fail with "resource busy or locked"
+      console.log('[Mockup] Temp mockup file will be cleaned by system:', outputFile.nativePath);
+
+      // Return only binary data (no file reference needed)
       return {
-        fileData: fileData,
-        tempMockupFile: outputFile
+        fileData: fileData
       };
 
     }, {
