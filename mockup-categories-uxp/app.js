@@ -254,12 +254,33 @@ async function handleNewJob(message) {
       console.error('[Job] WebSocket not connected');
       addLog('error', 'WebSocket not connected');
     }
+
+    // Delete mockup file with short delay (file was locked from write/read)
+    if (result.tempMockupFile) {
+      setTimeout(async () => {
+        try {
+          await result.tempMockupFile.delete();
+          console.log('[Job] Deleted temp mockup file after delay');
+        } catch (err) {
+          console.warn('[Job] Could not delete temp mockup after delay:', err.message);
+        }
+      }, 500); // 500ms delay is enough for file system to release lock
+    }
   } catch (error) {
     console.error('[Job] Error occurred:', error);
     console.error('[Job] Error stack:', error.stack);
 
-    // Note: Temp files are now cleaned up immediately in processMockup(),
-    // so no additional cleanup needed here
+    // Try to delete mockup file if it exists (with delay)
+    if (result && result.tempMockupFile) {
+      setTimeout(async () => {
+        try {
+          await result.tempMockupFile.delete();
+          console.log('[Job] Deleted temp mockup file after error');
+        } catch (err) {
+          console.warn('[Job] Could not delete temp mockup after error:', err.message);
+        }
+      }, 500);
+    }
 
     // Send failure response
     if (wsClient && wsClient.isConnected()) {
@@ -367,8 +388,7 @@ async function processMockup(job) {
       await mockupDoc.close('no');
       console.log('[Mockup] Document closed');
 
-      // Delete temp files immediately now that we have data in memory
-      // This prevents file handle leaks and lock issues
+      // Delete temp image file immediately (not actively locked)
       try {
         await imageFile.delete();
         console.log('[Mockup] Deleted temp image file immediately');
@@ -376,16 +396,11 @@ async function processMockup(job) {
         console.warn('[Mockup] Could not delete temp image immediately:', err.message);
       }
 
-      try {
-        await outputFile.delete();
-        console.log('[Mockup] Deleted temp mockup file immediately');
-      } catch (err) {
-        console.warn('[Mockup] Could not delete temp mockup immediately:', err.message);
-      }
-
-      // Return only the binary data (no file references to prevent leaks)
+      // Return binary data and mockup file reference for delayed deletion
+      // (mockup file is still locked from write/read operations)
       return {
-        fileData: fileData
+        fileData: fileData,
+        tempMockupFile: outputFile
       };
 
     }, {
