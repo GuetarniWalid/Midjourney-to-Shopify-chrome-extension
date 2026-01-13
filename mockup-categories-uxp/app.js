@@ -237,12 +237,7 @@ async function handleNewJob(message) {
     console.log('[Job] Upload complete:', uploadResult.filePath);
     addLog('success', 'Upload complete');
 
-    // Cleanup temp files after successful upload
-    addLog('info', 'Cleaning up temp files...');
-    await cleanupTempFiles(result.tempImageFile, result.tempMockupFile);
-    addLog('success', 'Temp files cleaned up');
-
-    // Send success response with file URL
+    // Send success response with file URL first
     addLog('info', 'Sending result to extension...');
     if (wsClient && wsClient.isConnected()) {
       console.log('[Job] Sending WebSocket message...');
@@ -259,18 +254,34 @@ async function handleNewJob(message) {
       console.error('[Job] WebSocket not connected');
       addLog('error', 'WebSocket not connected');
     }
+
+    // Cleanup temp files after a delay to ensure files are released
+    setTimeout(async () => {
+      try {
+        addLog('info', 'Cleaning up temp files...');
+        await cleanupTempFiles(result.tempImageFile, result.tempMockupFile);
+        addLog('success', 'Temp files cleaned up');
+      } catch (cleanupError) {
+        console.error('[Job] Delayed cleanup failed:', cleanupError);
+        addLog('error', `Cleanup error: ${cleanupError.message}`);
+      }
+    }, 2000); // 2 second delay to allow file system to release locks
   } catch (error) {
     console.error('[Job] Error occurred:', error);
     console.error('[Job] Error stack:', error.stack);
 
-    // Try to cleanup temp files even if job failed
-    try {
-      if (result && (result.tempImageFile || result.tempMockupFile)) {
-        addLog('info', 'Cleaning up temp files after error...');
-        await cleanupTempFiles(result.tempImageFile, result.tempMockupFile);
-      }
-    } catch (cleanupError) {
-      console.error('[Job] Cleanup after error failed:', cleanupError);
+    // Try to cleanup temp files even if job failed (with delay)
+    if (result && (result.tempImageFile || result.tempMockupFile)) {
+      setTimeout(async () => {
+        try {
+          addLog('info', 'Cleaning up temp files after error...');
+          await cleanupTempFiles(result.tempImageFile, result.tempMockupFile);
+          addLog('success', 'Temp files cleaned up after error');
+        } catch (cleanupError) {
+          console.error('[Job] Cleanup after error failed:', cleanupError);
+          addLog('error', `Cleanup error: ${cleanupError.message}`);
+        }
+      }, 2000); // 2 second delay
     }
 
     // Send failure response
