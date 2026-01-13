@@ -237,7 +237,7 @@ async function handleNewJob(message) {
     console.log('[Job] Upload complete:', uploadResult.filePath);
     addLog('success', 'Upload complete');
 
-    // Send success response with file URL first
+    // Send success response with file URL
     addLog('info', 'Sending result to extension...');
     if (wsClient && wsClient.isConnected()) {
       console.log('[Job] Sending WebSocket message...');
@@ -254,35 +254,12 @@ async function handleNewJob(message) {
       console.error('[Job] WebSocket not connected');
       addLog('error', 'WebSocket not connected');
     }
-
-    // Cleanup temp files after a delay to ensure files are released
-    setTimeout(async () => {
-      try {
-        addLog('info', 'Cleaning up temp files...');
-        await cleanupTempFiles(result.tempImageFile, result.tempMockupFile);
-        addLog('success', 'Temp files cleaned up');
-      } catch (cleanupError) {
-        console.error('[Job] Delayed cleanup failed:', cleanupError);
-        addLog('error', `Cleanup error: ${cleanupError.message}`);
-      }
-    }, 2000); // 2 second delay to allow file system to release locks
   } catch (error) {
     console.error('[Job] Error occurred:', error);
     console.error('[Job] Error stack:', error.stack);
 
-    // Try to cleanup temp files even if job failed (with delay)
-    if (result && (result.tempImageFile || result.tempMockupFile)) {
-      setTimeout(async () => {
-        try {
-          addLog('info', 'Cleaning up temp files after error...');
-          await cleanupTempFiles(result.tempImageFile, result.tempMockupFile);
-          addLog('success', 'Temp files cleaned up after error');
-        } catch (cleanupError) {
-          console.error('[Job] Cleanup after error failed:', cleanupError);
-          addLog('error', `Cleanup error: ${cleanupError.message}`);
-        }
-      }, 2000); // 2 second delay
-    }
+    // Note: Temp files are now cleaned up immediately in processMockup(),
+    // so no additional cleanup needed here
 
     // Send failure response
     if (wsClient && wsClient.isConnected()) {
@@ -390,12 +367,25 @@ async function processMockup(job) {
       await mockupDoc.close('no');
       console.log('[Mockup] Document closed');
 
-      // Return file objects and binary data for cleanup
+      // Delete temp files immediately now that we have data in memory
+      // This prevents file handle leaks and lock issues
+      try {
+        await imageFile.delete();
+        console.log('[Mockup] Deleted temp image file immediately');
+      } catch (err) {
+        console.warn('[Mockup] Could not delete temp image immediately:', err.message);
+      }
+
+      try {
+        await outputFile.delete();
+        console.log('[Mockup] Deleted temp mockup file immediately');
+      } catch (err) {
+        console.warn('[Mockup] Could not delete temp mockup immediately:', err.message);
+      }
+
+      // Return only the binary data (no file references to prevent leaks)
       return {
-        filePath: outputFile.nativePath,
-        fileData: fileData,
-        tempMockupFile: outputFile,
-        tempImageFile: imageFile
+        fileData: fileData
       };
 
     }, {
@@ -711,33 +701,4 @@ function addLog(level, message) {
 function clearLogs() {
   logsContainer.innerHTML = '';
   addLog('info', 'Logs cleared');
-}
-
-/**
- * Cleanup temporary files using file object references
- */
-async function cleanupTempFiles(tempImageFile, tempMockupFile) {
-  try {
-    // Delete temp image file
-    if (tempImageFile) {
-      try {
-        await tempImageFile.delete();
-        console.log('[Cleanup] Deleted temp image:', tempImageFile.nativePath);
-      } catch (error) {
-        console.warn('[Cleanup] Could not delete temp image:', error.message);
-      }
-    }
-
-    // Delete temp mockup file
-    if (tempMockupFile) {
-      try {
-        await tempMockupFile.delete();
-        console.log('[Cleanup] Deleted temp mockup:', tempMockupFile.nativePath);
-      } catch (error) {
-        console.warn('[Cleanup] Could not delete temp mockup:', error.message);
-      }
-    }
-  } catch (error) {
-    console.error('[Cleanup] Error during cleanup:', error);
-  }
 }
