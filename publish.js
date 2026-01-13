@@ -301,6 +301,7 @@ async function selectMockupAndGenerate(optionElement, category, subcategory) {
     if (response.success && response.data.success) {
       console.log('[SelectMockup] Mockup generated successfully:', response.data);
       showResultImage(response.data.resultPath);
+      hideLoadingState();
     } else {
       console.error('[SelectMockup] Job failed:', response);
       hideLoadingState();
@@ -437,40 +438,44 @@ publishBtn.addEventListener('click', async () => {
 });
 
 /**
- * Show loading state on mockup selector button
+ * Show loading state on mockup selector button (only replace the add button, not the whole container)
  */
 function showLoadingState() {
-  const container = document.querySelector('.mockup-selector-container');
-  container.innerHTML = `
-    <div class="mockup-selector-btn" style="display: flex; align-items: center; justify-content: center; flex-direction: column;">
-      <div class="loading-spinner"></div>
-      <p style="margin-top: 20px; color: #667eea; font-weight: 600;">Génération du mockup en cours...</p>
-    </div>
-  `;
+  const addButtonContainer = document.getElementById('addMockupButtonContainer');
+  if (addButtonContainer) {
+    addButtonContainer.innerHTML = `
+      <div class="mockup-selector-btn" style="display: flex; align-items: center; justify-content: center; flex-direction: column;">
+        <div class="loading-spinner"></div>
+        <p style="margin-top: 20px; color: #667eea; font-weight: 600;">Génération du mockup en cours...</p>
+      </div>
+    `;
+  }
 }
 
 /**
- * Hide loading state (restore button)
+ * Hide loading state (restore the add button)
  */
 function hideLoadingState() {
-  const container = document.querySelector('.mockup-selector-container');
-  container.innerHTML = `
-    <button type="button" class="mockup-selector-btn" id="mockupSelectorBtn">
-      <div class="mockup-selector-icon">
-        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24">
-          <path fill="currentColor" d="M12 21q-.425 0-.712-.288T11 20v-7H4q-.425 0-.712-.288T3 12t.288-.712T4 11h7V4q0-.425.288-.712T12 3t.713.288T13 4v7h7q.425 0 .713.288T21 12t-.288.713T20 13h-7v7q0 .425-.288.713T12 21"/>
-        </svg>
-      </div>
-    </button>
-  `;
+  const addButtonContainer = document.getElementById('addMockupButtonContainer');
+  if (addButtonContainer) {
+    addButtonContainer.innerHTML = `
+      <button type="button" class="mockup-selector-btn" id="mockupSelectorBtn">
+        <div class="mockup-selector-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24">
+            <path fill="currentColor" d="M12 21q-.425 0-.712-.288T11 20v-7H4q-.425 0-.712-.288T3 12t.288-.712T4 11h7V4q0-.425.288-.712T12 3t.713.288T13 4v7h7q.425 0 .713.288T21 12t-.288.713T20 13h-7v7q0 .425-.288.713T12 21"/>
+          </svg>
+        </div>
+      </button>
+    `;
 
-  // Re-attach event listener
-  document.getElementById('mockupSelectorBtn').addEventListener('click', () => {
-    if (categoriesData.length > 0) {
-      populateMockupModal(categoriesData);
-    }
-    mockupModal.classList.add('active');
-  });
+    // Re-attach event listener
+    document.getElementById('mockupSelectorBtn').addEventListener('click', () => {
+      if (categoriesData.length > 0) {
+        populateMockupModal(categoriesData);
+      }
+      mockupModal.classList.add('active');
+    });
+  }
 }
 
 /**
