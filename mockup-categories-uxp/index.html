@@ -34,29 +34,11 @@
         color: #fff;
       }
 
-      .info-box {
-        background-color: #1e1e1e;
-        border: 1px solid #444;
-        border-radius: 4px;
-        padding: 16px;
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
         margin-bottom: 16px;
-        font-size: 12px;
-        color: #999;
-        line-height: 1.6;
-      }
-
-      .info-box h2 {
-        color: #2196f3;
-        font-size: 14px;
-        margin-bottom: 8px;
-      }
-
-      .info-box p {
-        margin-bottom: 8px;
-      }
-
-      .info-box strong {
-        color: #fff;
       }
 
       .status-section {
@@ -70,8 +52,13 @@
       .status-row {
         display: flex;
         align-items: center;
+        justify-content: space-between;
+      }
+
+      .status-left {
+        display: flex;
+        align-items: center;
         gap: 8px;
-        margin-bottom: 8px;
       }
 
       .status-indicator {
@@ -79,122 +66,214 @@
         height: 12px;
         border-radius: 50%;
         flex-shrink: 0;
-        background-color: #ff9800;
-        box-shadow: 0 0 8px rgba(255, 152, 0, 0.6);
+        transition: all 0.3s ease;
+      }
+
+      .status-indicator.disconnected {
+        background-color: #ff5252;
+        box-shadow: 0 0 8px rgba(255, 82, 82, 0.6);
+      }
+
+      .status-indicator.connected {
+        background-color: #4caf50;
+        box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
       }
 
       .status-text {
         font-size: 13px;
         font-weight: 500;
-        color: #ff9800;
       }
 
-      .phase-list {
+      .button {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+      }
+
+      .button.primary {
+        background-color: #2196f3;
+        color: white;
+      }
+
+      .button.primary:hover {
+        background-color: #1976d2;
+      }
+
+      .button.secondary {
+        background-color: #ff5252;
+        color: white;
+      }
+
+      .button.secondary:hover {
+        background-color: #d32f2f;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 16px;
+      }
+
+      .stat-card {
         background-color: #1e1e1e;
         border: 1px solid #444;
         border-radius: 4px;
-        padding: 16px;
-      }
-
-      .phase-list h3 {
-        color: #fff;
-        font-size: 13px;
-        margin-bottom: 12px;
-      }
-
-      .phase-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 0;
-        border-bottom: 1px solid #333;
-        font-size: 12px;
-      }
-
-      .phase-item:last-child {
-        border-bottom: none;
-      }
-
-      .phase-item .icon {
-        font-size: 14px;
-        width: 20px;
+        padding: 12px;
         text-align: center;
       }
 
-      .phase-item.done .icon {
-        color: #4caf50;
+      .stat-label {
+        font-size: 11px;
+        color: #999;
+        margin-bottom: 4px;
       }
 
-      .phase-item.pending .icon {
+      .stat-value {
+        font-size: 24px;
+        font-weight: 600;
+        color: #2196f3;
+      }
+
+      .logs-section {
+        flex: 1;
+        background-color: #1e1e1e;
+        border: 1px solid #444;
+        border-radius: 4px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .logs-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #333;
+      }
+
+      .logs-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+      }
+
+      .clear-btn {
+        padding: 4px 12px;
+        background-color: #444;
+        border: none;
+        border-radius: 3px;
+        color: #e0e0e0;
+        font-size: 11px;
+        cursor: pointer;
+      }
+
+      .clear-btn:hover {
+        background-color: #555;
+      }
+
+      .logs-container {
+        flex: 1;
+        overflow-y: auto;
+        font-size: 11px;
+        font-family: 'Consolas', 'Monaco', monospace;
+      }
+
+      .log-entry {
+        display: grid;
+        grid-template-columns: 80px 70px 1fr;
+        gap: 8px;
+        padding: 4px 0;
+        border-bottom: 1px solid #2a2a2a;
+      }
+
+      .log-time {
         color: #666;
       }
 
-      .phase-item.done {
+      .log-level {
+        font-weight: 600;
+        text-transform: uppercase;
+        font-size: 10px;
+      }
+
+      .log-level.info {
+        color: #2196f3;
+      }
+
+      .log-level.success {
         color: #4caf50;
       }
 
-      .phase-item.pending {
-        color: #666;
+      .log-level.error {
+        color: #ff5252;
+      }
+
+      .log-level.warning {
+        color: #ff9800;
+      }
+
+      .log-message {
+        color: #e0e0e0;
+      }
+
+      .logs-container::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .logs-container::-webkit-scrollbar-track {
+        background: #1a1a1a;
+      }
+
+      .logs-container::-webkit-scrollbar-thumb {
+        background: #444;
+        border-radius: 4px;
+      }
+
+      .logs-container::-webkit-scrollbar-thumb:hover {
+        background: #555;
       }
     </style>
   </head>
   <body>
-    <h1>Mockup Automation Plugin</h1>
-
-    <div class="info-box">
-      <h2>Current Status: Phase 1 - Infrastructure</h2>
-      <p>
-        This UXP plugin is prepared for <strong>Phase 2</strong> mockup automation.
-      </p>
-      <p>
-        <strong>Current Setup:</strong> The Node.js server (run <code>npm start</code> from project root) handles category serving on port 3001.
-      </p>
+    <div class="header">
+      <h1>Mockup Automation</h1>
     </div>
 
     <div class="status-section">
       <div class="status-row">
-        <div class="status-indicator"></div>
-        <span class="status-text">Ready for Phase 2 Development</span>
+        <div class="status-left">
+          <div id="statusIndicator" class="status-indicator disconnected"></div>
+          <span id="statusText" class="status-text">Disconnected</span>
+        </div>
+        <button id="connectBtn" class="button primary">Connect to Server</button>
       </div>
     </div>
 
-    <div class="phase-list">
-      <h3>Development Roadmap</h3>
-
-      <div class="phase-item done">
-        <span class="icon">✓</span>
-        <span>Chrome extension captures images</span>
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-label">Jobs Received</div>
+        <div id="jobsReceived" class="stat-value">0</div>
       </div>
-
-      <div class="phase-item done">
-        <span class="icon">✓</span>
-        <span>Node.js server reads mockups folder</span>
+      <div class="stat-card">
+        <div class="stat-label">Jobs Completed</div>
+        <div id="jobsCompleted" class="stat-value">0</div>
       </div>
+    </div>
 
-      <div class="phase-item done">
-        <span class="icon">✓</span>
-        <span>Categories served to extension</span>
+    <div class="logs-section">
+      <div class="logs-header">
+        <span class="logs-title">Activity Log</span>
+        <button id="clearLogsBtn" class="clear-btn">Clear</button>
       </div>
-
-      <div class="phase-item pending">
-        <span class="icon">○</span>
-        <span>Connect UXP plugin to Node.js server</span>
-      </div>
-
-      <div class="phase-item pending">
-        <span class="icon">○</span>
-        <span>Receive mockup job requests</span>
-      </div>
-
-      <div class="phase-item pending">
-        <span class="icon">○</span>
-        <span>Automate mockup creation in Photoshop</span>
-      </div>
-
-      <div class="phase-item pending">
-        <span class="icon">○</span>
-        <span>Return completed mockups</span>
-      </div>
+      <div id="logsContainer" class="logs-container"></div>
     </div>
 
     <script src="./app.js"></script>

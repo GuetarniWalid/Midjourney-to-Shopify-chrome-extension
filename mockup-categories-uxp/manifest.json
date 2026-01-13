@@ -11,6 +11,15 @@
   "requiredPermissions": {
     "localFileSystem": "fullAccess",
     "network": {
+      "domains": [
+        "http://localhost:8081",
+        "ws://localhost:8081",
+        "http://localhost:3001",
+        "https://*"
+      ]
+    },
+    "webview": {
+      "allow": "yes",
       "domains": ["*"]
     }
   },

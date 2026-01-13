@@ -7,8 +7,8 @@ A Chrome extension that allows users to publish images from any webpage to Mysel
 This project consists of three components that work together:
 
 1. **Chrome Extension** - Captures images from any webpage and displays a publish form
-2. **Node.js Bridge Server** - Reads mockups folder structure and serves categories via REST API
-3. **UXP Plugin** *(Phase 2 - Future)* - Will automate mockup creation in Adobe Photoshop
+2. **Node.js Bridge Server** - Manages categories, WebSocket communication, and job orchestration
+3. **UXP Plugin** - Automates mockup creation in Adobe Photoshop using smart objects
 
 ## Architecture
 
@@ -19,21 +19,28 @@ This project consists of three components that work together:
 └──────────┬──────────┘
            │
            ↓ HTTP Request (localhost:3001)
+           │ POST /submit-job (job submission)
 ┌─────────────────────┐
-│  Node.js Server     │ → Scans mockups folder structure
-│    (Port 3001)      │ → Serves categories/subcategories via REST API
+│  Node.js Server     │ → HTTP Server (port 3001): REST API
+│  (Port 3001/8081)   │ → WebSocket Server (port 8081): UXP communication
 └──────────┬──────────┘
            │
-           ↓ Reads folder structure
-┌─────────────────────┐
-│  Mockups Folder     │ → Categories (Level 1: folders)
-│   (Local System)    │ → Subcategories (Level 2: subfolders)
-└─────────────────────┘
-
-┌─────────────────────┐
-│   UXP Plugin        │ → (Phase 2) Will receive job requests
-│   (Photoshop)       │ → (Phase 2) Automate mockup creation
-└─────────────────────┘
+           ├─→ Reads folder structure
+           │   ┌─────────────────────┐
+           │   │  Mockups Folder     │ → Categories (Level 1: folders)
+           │   │   (Local System)    │ → Subcategories (Level 2: subfolders with PSDs)
+           │   └─────────────────────┘
+           │
+           └─→ WebSocket (ws://localhost:8081)
+               ┌─────────────────────┐
+               │   UXP Plugin        │ → Connects to WebSocket server
+               │   (Photoshop)       │ → Receives job messages
+               │                     │ → Opens mockup PSD
+               │                     │ → Downloads image from URL
+               │                     │ → Replaces smart object
+               │                     │ → Exports JPEG
+               │                     │ → Sends completion message
+               └─────────────────────┘
 ```
 
 ## Project Structure
@@ -49,13 +56,14 @@ extension-Midjourney/
 │   ├── icon16.png
 │   ├── icon48.png
 │   └── icon128.png
-├── server.js                  # Node.js Express server
+├── server.js                  # Node.js Express + WebSocket server
 ├── package.json               # Node.js dependencies
 ├── .gitignore                 # Git ignore rules
-└── mockup-categories-uxp/     # UXP plugin (Phase 2 placeholder)
+└── mockup-categories-uxp/     # UXP plugin
     ├── manifest.json          # UXP plugin manifest
     ├── index.html             # Plugin UI
-    ├── app.js                 # Plugin logic (placeholder)
+    ├── app.js                 # Plugin logic with Photoshop automation
+    ├── websocket-client.js    # WebSocket client for server communication
     ├── icons/                 # Plugin icons
     └── README.md              # UXP plugin documentation
 ```
@@ -111,9 +119,9 @@ C:\Users\gueta\Documents\Mes_projets\MyselfMonArt_Backend\photoshop-plugin\mocku
    - **Category**: Select from dropdown (populated from mockups folder)
 5. Click "Publier" to publish (currently in development)
 
-### 3. UXP Plugin Setup *(Optional - Phase 2)*
+### 3. UXP Plugin Setup
 
-The UXP plugin is currently a placeholder for future mockup automation.
+The UXP plugin automates mockup creation in Photoshop.
 
 **Load in Adobe Photoshop:**
 
@@ -123,24 +131,44 @@ The UXP plugin is currently a placeholder for future mockup automation.
 4. Select `mockup-categories-uxp/manifest.json`
 5. Click "Load"
 6. Open Photoshop → Plugins → Mockup Automation
+7. Click "Connect to Server" in the plugin UI
+8. The plugin will connect to the WebSocket server (ws://localhost:8081)
 
-The plugin displays the development roadmap and will be implemented in Phase 2.
+**Usage:**
+
+1. Make sure Photoshop is open with the plugin loaded and connected
+2. Use the Chrome extension to select an image and mockup
+3. Click "Publier" to submit the job
+4. The plugin will automatically:
+   - Receive the job via WebSocket
+   - Open the selected mockup PSD
+   - Download the image from the URL
+   - Replace the smart object layer with the new image
+   - Flatten and export as JPEG
+   - Send completion message back to the extension
+5. Check the plugin logs to monitor progress
 
 ## Features
 
-### Current (Phase 1)
+### Current
 - ✅ Works on **any domain** (not just Midjourney)
 - ✅ Captures first large image from any webpage
 - ✅ Beautiful gradient UI with publish form
 - ✅ Categories loaded dynamically from local mockups folder
 - ✅ Node.js server reads folder structure (2 levels: categories/subcategories)
 - ✅ Background script acts as proxy for API calls
+- ✅ WebSocket server for real-time UXP plugin communication
+- ✅ UXP plugin with full Photoshop automation
+- ✅ Automated mockup creation (downloads image, replaces smart object, exports JPEG)
+- ✅ Aspect ratio detection (portrait/landscape/square)
+- ✅ Visual mockup selector with preview images
+- ✅ Job submission and completion tracking
 
-### Future (Phase 2)
-- ⏳ UXP plugin connection to Node.js server
-- ⏳ Automated mockup creation in Photoshop
-- ⏳ Job queue system for batch processing
+### Future
 - ⏳ Actual publishing to backend API
+- ⏳ File cleanup (delete processed images after upload)
+- ⏳ Progress indicators during mockup processing
+- ⏳ Batch processing support
 
 ## Technical Details
 
@@ -160,7 +188,14 @@ The plugin displays the development roadmap and will be implemented in Phase 2.
 5. `publish.js` retrieves image from storage
 6. `publish.js` sends message to `background.js` to fetch categories
 7. `background.js` fetches from Node.js server and returns data
-8. Categories populate the dropdown
+8. Categories populate the dropdown and modal
+9. User selects mockup and clicks "Publier"
+10. `publish.js` sends job message to `background.js`
+11. `background.js` POSTs job to `/submit-job` endpoint
+12. Server forwards job to UXP plugin via WebSocket
+13. UXP plugin processes mockup and sends completion message
+14. Server returns result to extension
+15. Extension displays success/error message
 
 **Why background script proxy?**
 Extension pages cannot directly access `localhost` due to security restrictions. The background service worker acts as a proxy.
@@ -188,18 +223,70 @@ Extension pages cannot directly access `localhost` due to security restrictions.
    }
    ```
 
+### WebSocket Communication
+
+**Server Side (Node.js):**
+- WebSocket server on port 8081 using `ws` library
+- Manages single UXP plugin connection
+- Tracks pending jobs with Promise-based callbacks
+- Forwards job requests from HTTP endpoint to WebSocket
+- Handles `job_completed` and `job_failed` responses
+
+**Message Types:**
+```javascript
+{
+  type: 'connected',          // Server acknowledges connection
+}
+{
+  type: 'new_job',            // New mockup job
+  job: {
+    id: 'job_123...',
+    imageUrl: 'https://...',
+    mockupPath: 'C:\\...\\portrait.psd',
+    category: 'Salon',
+    subcategory: 'buffet-chene-lampe',
+    layout: 'portrait'
+  }
+}
+{
+  type: 'job_completed',      // Job finished successfully
+  jobId: 'job_123...',
+  resultPath: '/processed/job_123.jpg'
+}
+{
+  type: 'job_failed',         // Job failed
+  jobId: 'job_123...',
+  error: 'Error message'
+}
+```
+
 ### UXP Plugin
 
-**Current Status:**
-- Placeholder UI showing development roadmap
-- No functionality in Phase 1
-- Ready for Phase 2 implementation
+**Implementation:**
+- WebSocket client connects to ws://localhost:8081
+- Automatic reconnection with exponential backoff (max 5 attempts)
+- Receives jobs via WebSocket messages
+- Uses Photoshop DOM API for automation
+- Smart object detection and replacement
+- JPEG export with quality 12
 
-**Future Implementation:**
-- WebSocket or HTTP client to connect to Node.js server
-- Photoshop DOM API for mockup automation
-- Image loading and smart object replacement
-- Export and save functionality
+**Automation Workflow:**
+1. Receive job via WebSocket
+2. Open mockup PSD from file path
+3. Verify smart object layer named "Artwork" exists (case-insensitive)
+4. Download image from URL to temp folder
+5. Replace smart object content using batchPlay API
+6. Flatten document
+7. Export as JPEG
+8. Close document without saving PSD
+9. Send completion message
+
+**Important:** Mockup PSD files MUST contain a smart object layer named "Artwork" (case-insensitive: "artwork", "ARTWORK", "Artwork", etc.)
+
+**Error Handling:**
+- All errors caught and sent back as `job_failed` messages
+- Document always closed even if error occurs
+- Timeout after 2 minutes on server side
 
 ## Development
 
@@ -257,6 +344,41 @@ curl http://localhost:3001/categories
 2. Verify server is accessible: `curl http://localhost:3001/health`
 3. Check console for errors in publish page (F12)
 
+### UXP Plugin not connecting
+
+**Error:** Plugin shows "Disconnected" status
+
+**Solution:**
+1. Make sure Node.js server is running (WebSocket server starts automatically)
+2. Check server console for WebSocket connection messages
+3. In Photoshop, click "Connect to Server" button in the plugin
+4. Verify no firewall is blocking port 8081
+
+### Job submission fails
+
+**Error:** "UXP plugin is not connected"
+
+**Solution:**
+1. Open Photoshop and load the UXP plugin
+2. Click "Connect to Server" in the plugin
+3. Wait for "Connected" status before submitting jobs
+4. Check plugin logs for connection errors
+
+### Mockup processing fails
+
+**Error:** "Smart object 'Artwork' not found"
+
+**Solution:**
+1. Verify mockup PSD has a smart object layer named "Artwork" (case-insensitive)
+2. The layer name must be exactly "Artwork" - can be "artwork", "ARTWORK", "Artwork", etc.
+3. If the error message lists other smart objects found, rename one of them to "Artwork"
+4. Check plugin logs for the full layer path (e.g., "Group 1 > Artwork")
+
+**Common mistakes:**
+- Layer is named "Art" or "Image" instead of "Artwork"
+- Layer is a regular layer, not a smart object
+- Typo in layer name (e.g., "Artowrk", "Art work")
+
 ### No image found
 
 The extension looks for images larger than 100x100px. If no image is found:
@@ -273,7 +395,16 @@ The extension looks for images larger than 100x100px. If no image is found:
 
 ## Version History
 
-### v2.0.0 (Current)
+### v3.0.0 (Current)
+- Full mockup automation with Photoshop integration
+- WebSocket server for real-time UXP plugin communication
+- Automated smart object replacement and JPEG export
+- Aspect ratio detection (portrait/landscape/square)
+- Visual mockup selector with preview images
+- Product type selector (toile/poster/tapisserie)
+- Job submission and completion tracking
+
+### v2.0.0
 - Complete rewrite from Midjourney-specific to generic image publisher
 - Added Node.js bridge server
 - Removed all Midjourney-specific code
