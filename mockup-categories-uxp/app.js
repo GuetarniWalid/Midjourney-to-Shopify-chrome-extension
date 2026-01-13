@@ -239,7 +239,7 @@ async function handleNewJob(message) {
 
     // Cleanup temp files after successful upload
     addLog('info', 'Cleaning up temp files...');
-    await cleanupTempFiles(result.tempImagePath, result.tempMockupPath);
+    await cleanupTempFiles(result.tempImageFile, result.tempMockupFile);
     addLog('success', 'Temp files cleaned up');
 
     // Send success response with file URL
@@ -265,9 +265,9 @@ async function handleNewJob(message) {
 
     // Try to cleanup temp files even if job failed
     try {
-      if (result && (result.tempImagePath || result.tempMockupPath)) {
+      if (result && (result.tempImageFile || result.tempMockupFile)) {
         addLog('info', 'Cleaning up temp files after error...');
-        await cleanupTempFiles(result.tempImagePath, result.tempMockupPath);
+        await cleanupTempFiles(result.tempImageFile, result.tempMockupFile);
       }
     } catch (cleanupError) {
       console.error('[Job] Cleanup after error failed:', cleanupError);
@@ -379,12 +379,12 @@ async function processMockup(job) {
       await mockupDoc.close('no');
       console.log('[Mockup] Document closed');
 
-      // Return file paths and binary data
+      // Return file objects and binary data for cleanup
       return {
         filePath: outputFile.nativePath,
         fileData: fileData,
-        tempMockupPath: outputFile.nativePath,
-        tempImagePath: imageFile.nativePath
+        tempMockupFile: outputFile,
+        tempImageFile: imageFile
       };
 
     }, {
@@ -703,33 +703,25 @@ function clearLogs() {
 }
 
 /**
- * Cleanup temporary files
+ * Cleanup temporary files using file object references
  */
-async function cleanupTempFiles(tempImagePath, tempMockupPath) {
-  const fs = require('uxp').storage.localFileSystem;
-
+async function cleanupTempFiles(tempImageFile, tempMockupFile) {
   try {
     // Delete temp image file
-    if (tempImagePath) {
+    if (tempImageFile) {
       try {
-        const tempImageFile = await fs.getEntryWithUrl('file:///' + tempImagePath.replace(/\\/g, '/'));
-        if (tempImageFile) {
-          await tempImageFile.delete();
-          console.log('[Cleanup] Deleted temp image:', tempImagePath);
-        }
+        await tempImageFile.delete();
+        console.log('[Cleanup] Deleted temp image:', tempImageFile.nativePath);
       } catch (error) {
         console.warn('[Cleanup] Could not delete temp image:', error.message);
       }
     }
 
     // Delete temp mockup file
-    if (tempMockupPath) {
+    if (tempMockupFile) {
       try {
-        const tempMockupFile = await fs.getEntryWithUrl('file:///' + tempMockupPath.replace(/\\/g, '/'));
-        if (tempMockupFile) {
-          await tempMockupFile.delete();
-          console.log('[Cleanup] Deleted temp mockup:', tempMockupPath);
-        }
+        await tempMockupFile.delete();
+        console.log('[Cleanup] Deleted temp mockup:', tempMockupFile.nativePath);
       } catch (error) {
         console.warn('[Cleanup] Could not delete temp mockup:', error.message);
       }
