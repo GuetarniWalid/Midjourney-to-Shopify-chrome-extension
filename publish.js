@@ -493,12 +493,15 @@ function showResultImage(imagePath) {
   // Find the add button container by ID
   const addButtonContainer = document.getElementById('addMockupButtonContainer');
 
+  // Add cache-busting parameter to prevent browser from showing cached images
+  const cacheBustedPath = imagePath + '?t=' + Date.now();
+
   // Create new mockup item
   const mockupItem = document.createElement('div');
   mockupItem.className = 'mockup-item';
   mockupItem.setAttribute('data-index', imageIndex);
   mockupItem.innerHTML = `
-    <img src="${imagePath}" alt="Mockup généré" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
+    <img src="${cacheBustedPath}" alt="Mockup généré" style="width: 100%; height: 100%; object-fit: cover; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);" />
     <div class="remove-mockup-btn" data-index="${imageIndex}" style="position: absolute; top: 10px; right: 10px; background: white; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background 0.2s ease;" onmouseover="this.style.background='#ff4444'; this.style.color='white';" onmouseout="this.style.background='white'; this.style.color='currentColor';">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <line x1="18" y1="6" x2="6" y2="18"></line>
