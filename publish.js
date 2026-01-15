@@ -1,12 +1,29 @@
 // Configuration
 const CONFIG = {
-  API_URL: 'https://backend.myselfmonart.com/api/midjourney/publish',
+  API_URL: 'http://localhost:3333',
   MOCKUP_SERVER_URL: 'http://localhost:3001'
 };
 
+// Custom alert function
+function customAlert(message) {
+  const modal = document.getElementById('customAlertModal');
+  const messageElement = document.getElementById('customAlertMessage');
+  const btn = document.getElementById('customAlertBtn');
+
+  messageElement.textContent = message;
+  modal.classList.add('active');
+
+  // Close on button click
+  const closeAlert = () => {
+    modal.classList.remove('active');
+    btn.removeEventListener('click', closeAlert);
+  };
+
+  btn.addEventListener('click', closeAlert);
+}
+
 // Get elements
 const imageContainer = document.getElementById('imageContainer');
-const altTextInput = document.getElementById('alt-text');
 const categorySelect = document.getElementById('category');
 const publishBtn = document.getElementById('publish-btn');
 const ratioBadge = document.getElementById('ratioBadge');
@@ -24,13 +41,20 @@ let categoriesData = [];
 let currentLayout = 'square'; // Default layout: portrait, landscape, or square
 let isProcessing = false;
 let resultImageUrls = []; // Array to store multiple generated mockups
+let resultImageContexts = []; // Array to store mockup contexts (category/subcategory descriptions)
+
+// Collection selector state
+let collections = []; // Array of {id, title} from API
+let selectedCollection = null; // Currently selected {id, title}
+let isLoadingCollections = false;
+let filteredCollections = []; // Filtered by search term
 
 // Initialize page
 async function init() {
   console.log('[Init] Initializing publish page...');
 
   // Get image data from storage
-  const result = await chrome.storage.local.get(['publishImage', 'publishPrompt', 'publishAspectRatio']);
+  const result = await chrome.storage.local.get(['publishImage', 'publishAspectRatio']);
   console.log('[Init] Retrieved from storage:', result);
 
   if (result.publishImage) {
@@ -52,6 +76,10 @@ async function init() {
   // Initialize mockup selector
   console.log('[Init] Initializing mockup selector...');
   initMockupSelector();
+
+  // Initialize collection selector
+  console.log('[Init] Initializing collection selector...');
+  initCollectionSelector();
 
   console.log('[Init] Initialization complete');
 }
@@ -135,6 +163,10 @@ function updateProductTypeSlider() {
   // Update slider
   productTypeSlider.style.width = `${sliderWidth}px`;
   productTypeSlider.style.transform = `translateX(${sliderLeft}px)`;
+
+  // Reload collections for new product type
+  clearCollectionSelection();
+  loadCollections(checkedRadio.value);
 }
 
 /**
@@ -165,6 +197,237 @@ function initMockupSelector() {
       console.log('[MockupSelector] Modal background clicked, closing...');
       mockupModal.classList.remove('active');
     }
+  });
+}
+
+/**
+ * Initialize collection selector
+ */
+function initCollectionSelector() {
+  const searchInput = document.getElementById('collectionSearch');
+  const dropdown = document.getElementById('collectionDropdown');
+
+  // Open dropdown on input click/focus
+  searchInput.addEventListener('click', () => {
+    if (collections.length > 0 && !dropdown.classList.contains('active')) {
+      dropdown.classList.add('active');
+    }
+  });
+
+  searchInput.addEventListener('focus', () => {
+    if (collections.length > 0) {
+      dropdown.classList.add('active');
+    }
+  });
+
+  // Filter on input
+  searchInput.addEventListener('input', (e) => {
+    filterCollections(e.target.value);
+  });
+
+  // Handle keyboard navigation
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      dropdown.classList.remove('active');
+      searchInput.blur();
+    }
+
+    // Backspace to clear selection
+    if (e.key === 'Backspace' && selectedCollection) {
+      clearCollectionSelection();
+      searchInput.value = '';
+      filterCollections('');
+    }
+  });
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!searchInput.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.classList.remove('active');
+    }
+  });
+
+  // Load initial collections for default product type
+  const defaultProductType = document.querySelector('input[name="productType"]:checked').value;
+  loadCollections(defaultProductType);
+}
+
+/**
+ * Load collections for a given product type
+ */
+async function loadCollections(productType) {
+  console.log('[Collections] Loading collections for type:', productType);
+
+  try {
+    isLoadingCollections = true;
+    showCollectionLoadingState();
+
+    // Fetch collections via background script
+    const response = await chrome.runtime.sendMessage({
+      action: 'getCollections',
+      productType: productType
+    });
+
+    console.log('[Collections] Response:', response);
+
+    if (!response) {
+      console.error('[Collections] No response received');
+      showCollectionError('Erreur: Serveur non accessible');
+      customAlert('Le serveur backend n\'est pas accessible.\n\nVeuillez démarrer le serveur backend sur:\nhttp://localhost:3333');
+      return;
+    }
+
+    if (!response.success) {
+      console.error('[Collections] Failed to load:', response.error);
+      showCollectionError('Erreur lors du chargement des collections');
+      customAlert('Impossible de charger les collections.\n\nVeuillez vérifier que le serveur backend est démarré sur:\nhttp://localhost:3333\n\nErreur: ' + response.error);
+      return;
+    }
+
+    if (response.data && response.data.success && response.data.data) {
+      collections = response.data.data;
+      filteredCollections = [...collections];
+      console.log('[Collections] Loaded', collections.length, 'collections');
+      populateCollections(filteredCollections);
+    } else {
+      console.error('[Collections] Invalid response format:', response);
+      showCollectionError('Erreur lors du chargement des collections');
+      customAlert('Format de réponse invalide.\n\nVeuillez vérifier que le serveur backend est démarré correctement.');
+    }
+  } catch (error) {
+    console.error('[Collections] Error:', error);
+    showCollectionError('Erreur: ' + error.message);
+    customAlert('Erreur lors du chargement des collections.\n\nVeuillez démarrer le serveur backend sur:\nhttp://localhost:3333\n\nErreur: ' + error.message);
+  } finally {
+    isLoadingCollections = false;
+  }
+}
+
+/**
+ * Show loading state in dropdown
+ */
+function showCollectionLoadingState() {
+  const dropdown = document.getElementById('collectionDropdown');
+  dropdown.innerHTML = `
+    <div class="collection-loading">
+      <div class="loading-spinner"></div>
+      <p>Chargement des collections...</p>
+    </div>
+  `;
+  dropdown.classList.add('active');
+}
+
+/**
+ * Show error in dropdown
+ */
+function showCollectionError(message) {
+  const dropdown = document.getElementById('collectionDropdown');
+  dropdown.innerHTML = `
+    <div class="collection-no-results">${message}</div>
+  `;
+}
+
+/**
+ * Populate collections dropdown
+ */
+function populateCollections(collectionsToShow) {
+  const dropdown = document.getElementById('collectionDropdown');
+  const searchInput = document.getElementById('collectionSearch');
+
+  if (collectionsToShow.length === 0) {
+    dropdown.innerHTML = `
+      <div class="collection-no-results">Aucune collection trouvée</div>
+    `;
+    return;
+  }
+
+  dropdown.innerHTML = '';
+
+  collectionsToShow.forEach(collection => {
+    const option = document.createElement('div');
+    option.className = 'collection-option';
+    option.textContent = collection.title;
+    option.dataset.id = collection.id;
+    option.dataset.title = collection.title;
+
+    // Highlight if selected
+    if (selectedCollection && selectedCollection.id === collection.id) {
+      option.classList.add('selected');
+    }
+
+    option.addEventListener('click', () => selectCollection(collection));
+
+    dropdown.appendChild(option);
+  });
+
+  // Enable search input
+  searchInput.removeAttribute('readonly');
+  searchInput.placeholder = 'Rechercher une collection...';
+}
+
+/**
+ * Select a collection
+ */
+function selectCollection(collection) {
+  console.log('[Collections] Selected:', collection);
+
+  selectedCollection = collection;
+
+  const searchInput = document.getElementById('collectionSearch');
+  const hiddenInput = document.getElementById('selectedCollectionId');
+  const dropdown = document.getElementById('collectionDropdown');
+
+  // Update UI
+  searchInput.value = collection.title;
+  searchInput.classList.add('has-selection');
+  hiddenInput.value = collection.id;
+
+  // Close dropdown
+  dropdown.classList.remove('active');
+
+  // Update selected state in dropdown
+  document.querySelectorAll('.collection-option').forEach(opt => {
+    opt.classList.remove('selected');
+    if (opt.dataset.id === collection.id) {
+      opt.classList.add('selected');
+    }
+  });
+}
+
+/**
+ * Filter collections based on search input
+ */
+function filterCollections(searchTerm) {
+  const term = searchTerm.toLowerCase().trim();
+
+  if (term === '') {
+    filteredCollections = [...collections];
+  } else {
+    filteredCollections = collections.filter(collection =>
+      collection.title.toLowerCase().includes(term)
+    );
+  }
+
+  populateCollections(filteredCollections);
+
+  const dropdown = document.getElementById('collectionDropdown');
+  dropdown.classList.add('active');
+}
+
+/**
+ * Clear collection selection
+ */
+function clearCollectionSelection() {
+  selectedCollection = null;
+
+  const searchInput = document.getElementById('collectionSearch');
+  const hiddenInput = document.getElementById('selectedCollectionId');
+
+  searchInput.classList.remove('has-selection');
+  hiddenInput.value = '';
+
+  document.querySelectorAll('.collection-option.selected').forEach(opt => {
+    opt.classList.remove('selected');
   });
 }
 
@@ -275,7 +538,7 @@ async function selectMockupAndGenerate(optionElement, category, subcategory) {
     if (!result.publishImage) {
       console.error('[SelectMockup] No image found in storage');
       hideLoadingState();
-      alert('Aucune image trouvée');
+      customAlert('Aucune image trouvée');
       return;
     }
 
@@ -298,19 +561,47 @@ async function selectMockupAndGenerate(optionElement, category, subcategory) {
 
     console.log('[SelectMockup] Received response:', response);
 
-    if (response.success && response.data.success) {
+    // Check if response exists
+    if (!response) {
+      console.error('[SelectMockup] No response received');
+      hideLoadingState();
+      customAlert('Erreur: Aucune réponse du serveur');
+      return;
+    }
+
+    // Check for background script error
+    if (!response.success) {
+      console.error('[SelectMockup] Background error:', response.error);
+      hideLoadingState();
+
+      // Provide user-friendly French error messages
+      let errorMessage = response.error || 'Erreur lors de la génération du mockup';
+      if (errorMessage.includes('UXP plugin is not connected')) {
+        errorMessage = 'Le plugin Photoshop n\'est pas connecté.\n\nVeuillez:\n1. Ouvrir Photoshop\n2. Ouvrir le plugin UXP\n3. Cliquer sur "Connect to Server"';
+      }
+
+      customAlert(errorMessage);
+      return;
+    }
+
+    // Check for job success
+    if (response.data && response.data.success) {
       console.log('[SelectMockup] Mockup generated successfully:', response.data);
-      showResultImage(response.data.resultPath);
+
+      // Use mockupContext from server response (read from context.txt)
+      const mockupContext = response.data.mockupContext || `${category} - ${subcategory}`;
+
+      showResultImage(response.data.resultPath, mockupContext);
       hideLoadingState();
     } else {
       console.error('[SelectMockup] Job failed:', response);
       hideLoadingState();
-      alert('Erreur lors de la création du mockup:\n\n' + (response.data?.error || response.error || 'Erreur inconnue'));
+      customAlert('Erreur lors de la création du mockup:\n\n' + (response.data?.error || 'Erreur inconnue'));
     }
   } catch (error) {
     console.error('[SelectMockup] Error:', error);
     hideLoadingState();
-    alert('Erreur lors de la génération du mockup:\n\n' + error.message);
+    customAlert('Erreur lors de la génération du mockup:\n\n' + error.message);
   } finally {
     isProcessing = false;
   }
@@ -400,41 +691,198 @@ function showCategoryError(message) {
 publishBtn.addEventListener('click', async () => {
   console.log('[Publish] Publish button clicked');
 
-  const altText = altTextInput.value.trim();
   const productType = document.querySelector('input[name="productType"]:checked').value;
+
+  // Check if collection is selected
+  if (!selectedCollection) {
+    console.warn('[Publish] No collection selected');
+    customAlert('Veuillez sélectionner une collection');
+    return;
+  }
 
   // Check if at least one mockup has been generated
   const validMockups = resultImageUrls.filter(url => url !== null);
   if (validMockups.length === 0) {
     console.warn('[Publish] No generated mockups found');
-    alert('Veuillez d\'abord générer au moins un mockup en cliquant sur une catégorie');
+    customAlert('Veuillez d\'abord générer au moins un mockup');
     return;
   }
 
-  if (!altText) {
-    console.warn('[Publish] No alt text provided');
-    alert('Veuillez entrer un texte alternatif');
-    return;
+  // Show loading state
+  publishBtn.disabled = true;
+  const originalButtonText = publishBtn.textContent;
+  publishBtn.innerHTML = '<div class="loading-spinner" style="width: 24px; height: 24px; margin: 0 auto;"></div>';
+
+  try {
+    // Get stored data (original image)
+    const result = await chrome.storage.local.get(['publishImage']);
+
+    if (!result.publishImage) {
+      console.error('[Publish] No original image found');
+      customAlert('Image originale introuvable');
+      publishBtn.disabled = false;
+      publishBtn.textContent = originalButtonText;
+      return;
+    }
+
+    // Get valid mockup indices (filter out nulls but keep track of original indices)
+    const validMockupData = [];
+    for (let i = 0; i < resultImageUrls.length; i++) {
+      if (resultImageUrls[i] !== null) {
+        validMockupData.push({
+          url: resultImageUrls[i],
+          context: resultImageContexts[i] || ''
+        });
+      }
+    }
+
+    // Build image data array in specific order:
+    // [mockup1, originalImage, mockup2, mockup3, ...]
+    const imageDataArray = [];
+
+    // Add first mockup
+    if (validMockupData[0]) {
+      imageDataArray.push({
+        url: validMockupData[0].url,
+        mockupContext: validMockupData[0].context,
+        type: 'mockup'
+      });
+    }
+
+    // Add original image at position 2
+    imageDataArray.push({
+      url: result.publishImage,
+      type: 'original'
+    });
+
+    // Add remaining mockups
+    for (let i = 1; i < validMockupData.length; i++) {
+      imageDataArray.push({
+        url: validMockupData[i].url,
+        mockupContext: validMockupData[i].context,
+        type: 'mockup'
+      });
+    }
+
+    console.log('[Publish] Image order:', imageDataArray.map((item, idx) => ({
+      position: idx + 1,
+      type: item.type,
+      context: item.mockupContext,
+      url: item.url
+    })));
+
+    // Log detailed info about each image URL
+    console.log('[Publish] === DETAILED IMAGE URLS ===');
+    imageDataArray.forEach((item, idx) => {
+      console.log(`[Publish] Image ${idx}: type="${item.type}", url="${item.url}", context="${item.mockupContext || 'N/A'}"`);
+    });
+    console.log('[Publish] === END DETAILED URLS ===');
+
+    // Fetch all images and convert to base64
+    console.log('[Publish] Fetching images and converting to base64...');
+    const imagesArray = [];
+
+    for (let i = 0; i < imageDataArray.length; i++) {
+      const item = imageDataArray[i];
+      console.log(`[Publish] Fetching image ${i + 1}/${imageDataArray.length}:`, item.url);
+
+      const response = await fetch(item.url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch image ${i + 1}: ${response.statusText}`);
+      }
+
+      const blob = await response.blob();
+      console.log(`[Publish] Image ${i + 1} fetched, size:`, blob.size, 'bytes');
+
+      // Convert blob to base64 with data URI prefix
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          // Keep full data URI (e.g., "data:image/jpeg;base64,...")
+          resolve(reader.result);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      console.log(`[Publish] Image ${i + 1} converted to base64, length:`, base64.length);
+
+      const imageObject = {
+        base64Image: base64,
+        type: item.type
+      };
+
+      // Only add mockupContext for mockup images (not for original)
+      if (item.mockupContext) {
+        imageObject.mockupContext = item.mockupContext;
+      }
+
+      // Log what we're adding
+      console.log(`[Publish] Image ${i + 1} prepared:`, {
+        type: imageObject.type,
+        context: imageObject.mockupContext || 'N/A',
+        base64Length: base64.length,
+        base64Preview: base64.substring(0, 50) + '...'
+      });
+
+      imagesArray.push(imageObject);
+    }
+
+    // Map product type to backend format
+    const productTypeMapping = {
+      'toile': 'painting',
+      'poster': 'poster',
+      'tapisserie': 'tapestry'
+    };
+
+    // Create final data structure
+    const publishData = {
+      images: imagesArray,
+      ratio: currentLayout, // portrait, landscape, or square
+      productType: productTypeMapping[productType],
+      parentCollection: {
+        id: selectedCollection.id,
+        title: selectedCollection.title
+      }
+    };
+
+    console.log('[Publish] Final data structure ready, sending to backend...');
+    console.log('[Publish] Data summary:', {
+      imageCount: imagesArray.length,
+      ratio: currentLayout,
+      productType: productTypeMapping[productType],
+      collectionId: selectedCollection.id
+    });
+
+    // Send to backend API
+    const apiResponse = await fetch(`${CONFIG.API_URL}/api/shopify-product-publisher/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(publishData)
+    });
+
+    if (!apiResponse.ok) {
+      const errorData = await apiResponse.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${apiResponse.status}: ${apiResponse.statusText}`);
+    }
+
+    const apiResult = await apiResponse.json();
+    console.log('[Publish] Backend response:', apiResult);
+
+    customAlert('Publication réussie !\n\n' +
+      '- Total images: ' + imagesArray.length + '\n' +
+      '- Format: ' + publishData.ratio + '\n' +
+      '- Type: ' + publishData.productType + '\n' +
+      '- Collection: ' + selectedCollection.title);
+
+  } catch (error) {
+    console.error('[Publish] Error preparing images:', error);
+    customAlert('Erreur lors de la préparation des images:\n\n' + error.message);
+  } finally {
+    // Restore button state
+    publishBtn.disabled = false;
+    publishBtn.textContent = originalButtonText;
   }
-
-  // Get stored data
-  const result = await chrome.storage.local.get(['publishImage', 'publishPrompt']);
-
-  console.log('[Publish] Preparing to publish:', {
-    originalImage: result.publishImage,
-    generatedMockups: validMockups,
-    mockupCount: validMockups.length,
-    altText: altText,
-    productType: productType,
-    layout: currentLayout,
-    prompt: result.publishPrompt
-  });
-
-  // TODO: Send to backend API
-  alert('Fonctionnalité de publication vers le backend en cours de développement\n\nDonnées prêtes:\n- Nombre de mockups: ' + validMockups.length + '\n- Images générées: ' + validMockups.join(', ') + '\n- Alt text: ' + altText + '\n- Type: ' + productType);
-
-  // For now, just show success
-  console.log('[Publish] Ready to send to backend (not implemented yet)');
 });
 
 /**
@@ -481,12 +929,18 @@ function hideLoadingState() {
 /**
  * Show result image
  */
-function showResultImage(imagePath) {
+function showResultImage(imagePath, mockupContext = '') {
   console.log('[ShowResult] Adding mockup image:', imagePath);
+  console.log('[ShowResult] Mockup context:', mockupContext);
 
-  // Add to array
+  // Add to arrays
   resultImageUrls.push(imagePath);
+  resultImageContexts.push(mockupContext);
   const imageIndex = resultImageUrls.length - 1;
+
+  // Log complete arrays state
+  console.log('[ShowResult] Current resultImageUrls array:', resultImageUrls);
+  console.log('[ShowResult] Current resultImageContexts array:', resultImageContexts);
 
   const container = document.querySelector('.mockup-selector-container');
 
@@ -555,8 +1009,9 @@ async function removeMockup(index) {
     }
   }
 
-  // Remove from array (set to null to keep indices stable)
+  // Remove from arrays (set to null to keep indices stable)
   resultImageUrls[index] = null;
+  resultImageContexts[index] = null;
 
   // Remove from DOM
   const container = document.querySelector('.mockup-selector-container');

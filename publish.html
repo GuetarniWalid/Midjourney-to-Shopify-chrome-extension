@@ -24,8 +24,8 @@
         background: white;
         border-radius: 24px;
         box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-        overflow: hidden;
         display: flex;
+        padding-bottom: 200px;
       }
 
       .left-section {
@@ -37,7 +37,7 @@
       }
 
       .right-section {
-        width: 70%;
+        width: 60%;
         padding: 60px;
         display: flex;
         flex-direction: column;
@@ -57,7 +57,8 @@
       #imageContainer {
         width: 100%;
         position: sticky;
-        top: 80px;
+        top: 40px;
+        align-self: flex-start;
       }
 
       .image-preview {
@@ -132,6 +133,18 @@
       .btn-publish {
         padding: 20px 20px;
         border-radius: 10px;
+      }
+
+      .btn-publish:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+
+      .btn-publish:disabled:hover {
+        transform: none;
+        box-shadow: none;
       }
 
       .no-image {
@@ -406,6 +419,168 @@
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
       }
+
+      /* Collection Selector Styles */
+      .collection-selector-group {
+        margin-bottom: 32px;
+      }
+
+      .collection-dropdown-container {
+        position: relative;
+        width: 100%;
+      }
+
+      .collection-search-input {
+        width: 100%;
+        padding: 14px 18px;
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        font-size: 15px;
+        font-family: inherit;
+        transition: border-color 0.2s ease;
+        cursor: pointer;
+        background-color: white;
+      }
+
+      .collection-search-input:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .collection-search-input.has-selection {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+        border-color: #667eea;
+      }
+
+      .collection-dropdown {
+        position: absolute;
+        top: calc(100% + 8px);
+        left: 0;
+        right: 0;
+        max-height: 300px;
+        overflow-y: auto;
+        background: white;
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        z-index: 1000;
+        display: none;
+      }
+
+      .collection-dropdown.active {
+        display: block;
+      }
+
+      .collection-loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 20px;
+      }
+
+      .collection-loading p {
+        margin-top: 16px;
+        color: #667eea;
+        font-weight: 600;
+        font-size: 14px;
+      }
+
+      .collection-option {
+        padding: 12px 18px;
+        cursor: pointer;
+        transition: background-color 0.15s ease;
+        border-bottom: 1px solid #f1f3f5;
+        font-size: 15px;
+      }
+
+      .collection-option:last-child {
+        border-bottom: none;
+      }
+
+      .collection-option:hover {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%);
+      }
+
+      .collection-option.selected {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(118, 75, 162, 0.12) 100%);
+        font-weight: 600;
+        color: #667eea;
+      }
+
+      .collection-no-results {
+        padding: 32px 20px;
+        text-align: center;
+        color: #999;
+        font-size: 14px;
+      }
+
+      /* Custom Alert Modal */
+      .custom-alert-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 2000;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .custom-alert-modal.active {
+        display: flex;
+      }
+
+      .custom-alert-content {
+        background: white;
+        border-radius: 16px;
+        padding: 32px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        animation: alertSlideIn 0.3s ease-out;
+      }
+
+      @keyframes alertSlideIn {
+        from {
+          transform: translateY(-20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+
+      .custom-alert-message {
+        font-size: 18px;
+        font-weight: 600;
+        color: #2d3748;
+        text-align: center;
+        margin-bottom: 24px;
+        line-height: 1.6;
+        white-space: pre-line;
+      }
+
+      .custom-alert-btn {
+        width: 100%;
+        padding: 14px 24px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+      }
+
+      .custom-alert-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+      }
     </style>
   </head>
   <body>
@@ -468,6 +643,22 @@
             </select>
           </div>
 
+          <!-- Collection Selector -->
+          <div class="form-group collection-selector-group">
+            <label for="collectionSearch">Collection mère</label>
+            <div class="collection-dropdown-container">
+              <input type="text" id="collectionSearch" class="collection-search-input"
+                     placeholder="Rechercher une collection..." autocomplete="off" readonly />
+              <div class="collection-dropdown" id="collectionDropdown">
+                <div class="collection-loading">
+                  <div class="loading-spinner"></div>
+                  <p>Chargement des collections...</p>
+                </div>
+              </div>
+              <input type="hidden" id="selectedCollectionId" value="">
+            </div>
+          </div>
+
           <div class="button-group">
             <button type="button" class="btn-primary btn-publish" id="publish-btn">Publier</button>
           </div>
@@ -482,6 +673,14 @@
         <div id="mockupCategoriesContainer">
           <!-- Categories will be populated dynamically -->
         </div>
+      </div>
+    </div>
+
+    <!-- Custom Alert Modal -->
+    <div class="custom-alert-modal" id="customAlertModal">
+      <div class="custom-alert-content">
+        <div class="custom-alert-message" id="customAlertMessage"></div>
+        <button class="custom-alert-btn" id="customAlertBtn">OK</button>
       </div>
     </div>
 

@@ -43,8 +43,12 @@ const storage = multer.diskStorage({
     cb(null, UPLOADS_PATH);
   },
   filename: (req, file, cb) => {
-    // Use the original filename from the client
-    cb(null, file.originalname);
+    // Generate unique filename with timestamp and random string
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 8);
+    const extension = path.extname(file.originalname) || '.jpg';
+    const uniqueFilename = `mockup_${timestamp}_${randomString}${extension}`;
+    cb(null, uniqueFilename);
   }
 });
 
@@ -312,6 +316,18 @@ app.post('/submit-job', async (req, res) => {
     // Construct mockup PSD path
     const mockupPath = path.join(MOCKUPS_PATH, category, subcategory, `${layout}.psd`);
 
+    // Read context.txt file
+    const contextPath = path.join(MOCKUPS_PATH, category, subcategory, 'context.txt');
+    let mockupContext = null;
+    try {
+      console.log('[Context] Reading context from:', contextPath);
+      const contextContent = await fs.readFile(contextPath, 'utf-8');
+      mockupContext = contextContent.trim();
+      console.log('[Context] Read context.txt for', category, '/', subcategory, ':', mockupContext);
+    } catch (error) {
+      console.warn('[Context] No context.txt found for', category, '/', subcategory, '- Error:', error.message);
+    }
+
     // Send job to UXP plugin
     const job = {
       type: 'new_job',
@@ -330,6 +346,11 @@ app.post('/submit-job', async (req, res) => {
 
     // Wait for job completion
     const result = await jobPromise;
+
+    // Add mockupContext to result
+    if (mockupContext) {
+      result.mockupContext = mockupContext;
+    }
 
     res.json(result);
   } catch (error) {
