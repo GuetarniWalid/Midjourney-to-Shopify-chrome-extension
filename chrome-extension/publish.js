@@ -273,14 +273,14 @@ async function loadCollections(productType) {
     if (!response) {
       console.error('[Collections] No response received');
       showCollectionError('Erreur: Serveur non accessible');
-      customAlert('Le serveur backend n\'est pas accessible.\n\nVeuillez démarrer le serveur backend sur:\nhttp://localhost:3333');
+      customAlert('Le serveur backend n\'est pas accessible.\n\nVeuillez démarrer le serveur backend sur:\n' + CONFIG.API_URL);
       return;
     }
 
     if (!response.success) {
       console.error('[Collections] Failed to load:', response.error);
       showCollectionError('Erreur lors du chargement des collections');
-      customAlert('Impossible de charger les collections.\n\nVeuillez vérifier que le serveur backend est démarré sur:\nhttp://localhost:3333\n\nErreur: ' + response.error);
+      customAlert('Impossible de charger les collections.\n\nVeuillez vérifier que le serveur backend est démarré sur:\n' + CONFIG.API_URL + '\n\nErreur: ' + response.error);
       return;
     }
 
@@ -297,7 +297,7 @@ async function loadCollections(productType) {
   } catch (error) {
     console.error('[Collections] Error:', error);
     showCollectionError('Erreur: ' + error.message);
-    customAlert('Erreur lors du chargement des collections.\n\nVeuillez démarrer le serveur backend sur:\nhttp://localhost:3333\n\nErreur: ' + error.message);
+    customAlert('Erreur lors du chargement des collections.\n\nVeuillez démarrer le serveur backend sur:\n' + CONFIG.API_URL + '\n\nErreur: ' + error.message);
   } finally {
     isLoadingCollections = false;
   }
@@ -636,16 +636,26 @@ async function loadCategories() {
 
     console.log('[Categories] Received response:', response);
 
-    if (response.success && response.data.success && response.data.categories && response.data.categories.length > 0) {
+    // Check if background script returned an error
+    if (!response.success) {
+      console.error('[Categories] Background script error:', response.error);
+      showCategoryError('Erreur de connexion');
+      customAlert('Le serveur de mockups n\'est pas accessible.\n\nVeuillez démarrer le serveur:\ncd dist/mockup-server && npm start\n\nErreur: ' + response.error);
+      return;
+    }
+
+    if (response.data.success && response.data.categories && response.data.categories.length > 0) {
       console.log('[Categories] Populating categories:', response.data.categories);
       populateCategories(response.data.categories);
     } else {
       console.warn('[Categories] No categories found');
       showCategoryError('Aucune catégorie trouvée');
+      customAlert('Aucune catégorie de mockup trouvée.\n\nVérifiez que le serveur de mockups est démarré et que les dossiers de mockups existent.');
     }
   } catch (error) {
     console.error('[Categories] Error loading categories:', error);
     showCategoryError('Erreur: Le serveur UXP est-il démarré ?');
+    customAlert('Erreur lors du chargement des catégories.\n\nVeuillez démarrer le serveur de mockups:\ncd dist/mockup-server && npm start\n\nErreur: ' + error.message);
   }
 }
 

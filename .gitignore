@@ -1,6 +1,14 @@
 config.dev.js
 config.prod.js
 
+# Build output
+dist/
+
+# Environment files (local overrides)
+.env
+.env.local
+.env.production
+
 # Node.js
 node_modules/
 npm-debug.log

@@ -1,21 +1,18 @@
 {
-  "name": "myselfmonart-publisher",
-  "version": "2.0.0",
-  "description": "Bridge server for MyselfMonArt Publisher extension",
-  "main": "server.js",
+  "name": "myselfmonart-publisher-system",
+  "version": "3.0.0",
+  "description": "Complete MyselfMonArt publisher system - Chrome extension, Photoshop plugin, and mockup server",
   "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "multer": "^2.0.2",
-    "ws": "^8.14.2"
+    "build:dev": "node build.js development",
+    "build:prod": "node build.js production",
+    "build": "npm run build:dev",
+    "start:server": "cd dist/mockup-server && npm start"
   },
   "keywords": [
     "chrome-extension",
-    "mockups",
-    "photoshop"
+    "photoshop",
+    "uxp-plugin",
+    "mockup-automation"
   ],
   "author": "",
   "license": "MIT"

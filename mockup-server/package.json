@@ -1,0 +1,25 @@
+{
+  "name": "myselfmonart-publisher",
+  "version": "2.0.0",
+  "description": "Bridge server for MyselfMonArt Publisher extension",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build:dev": "node build.js development",
+    "build:prod": "node build.js production",
+    "build": "npm run build:dev"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "multer": "^2.0.2",
+    "ws": "^8.14.2"
+  },
+  "keywords": [
+    "chrome-extension",
+    "mockups",
+    "photoshop"
+  ],
+  "author": "",
+  "license": "MIT"
+}
