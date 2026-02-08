@@ -12,7 +12,7 @@ const multer = require('multer');
 
 const PORT = 3001;
 const WS_PORT = 8081;
-const MOCKUPS_PATH = 'C:\\Users\\gueta\\Documents\\Mes_projets\\MyselfMonArt_Backend\\photoshop-plugin\\mockups';
+const MOCKUPS_PATH = '__MOCKUPS_PATH__';
 const UPLOADS_PATH = path.join(__dirname, 'uploads');
 
 

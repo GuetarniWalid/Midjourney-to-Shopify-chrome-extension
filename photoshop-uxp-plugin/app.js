@@ -292,11 +292,12 @@ async function processMockup(job) {
     addLog('info', 'Opening mockup PSD file...');
     console.log('[Mockup] Mockup path:', job.mockupPath);
 
-    // Convert Windows path to file:// URL
+    // Convert local path to file:// URL (works on both Windows and Mac)
     let fileUrl = job.mockupPath;
     if (!fileUrl.startsWith('file://')) {
-      // Convert backslashes to forward slashes and encode
-      fileUrl = 'file:///' + job.mockupPath.replace(/\\/g, '/');
+      const normalized = job.mockupPath.replace(/\\/g, '/');
+      // Mac paths start with / (e.g. /Users/...), Windows with drive letter (e.g. C:/...)
+      fileUrl = normalized.startsWith('/') ? 'file://' + normalized : 'file:///' + normalized;
     }
     console.log('[Mockup] File URL:', fileUrl);
 

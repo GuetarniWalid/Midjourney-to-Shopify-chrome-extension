@@ -26,7 +26,8 @@ envContent.split('\n').forEach(line => {
 console.log('📝 Environment variables loaded:');
 console.log(`   API_URL: ${envVars.API_URL}`);
 console.log(`   MOCKUP_SERVER_URL: ${envVars.MOCKUP_SERVER_URL}`);
-console.log(`   WEBSOCKET_URL: ${envVars.WEBSOCKET_URL}\n`);
+console.log(`   WEBSOCKET_URL: ${envVars.WEBSOCKET_URL}`);
+console.log(`   MOCKUPS_PATH: ${envVars.MOCKUPS_PATH}\n`);
 
 // Create root dist directory
 const rootDistDir = path.join(__dirname, 'dist');
@@ -190,10 +191,10 @@ const serverSrcDir = path.join(__dirname, 'mockup-server');
 const serverDistDir = path.join(rootDistDir, 'mockup-server');
 fs.mkdirSync(serverDistDir);
 
-// Copy server files
-const serverFiles = ['server.js', 'package.json', 'package-lock.json'];
+// Files to copy as-is
+const serverFilesToCopy = ['package.json', 'package-lock.json'];
 
-serverFiles.forEach(file => {
+serverFilesToCopy.forEach(file => {
   const srcPath = path.join(serverSrcDir, file);
   const destPath = path.join(serverDistDir, file);
 
@@ -204,6 +205,21 @@ serverFiles.forEach(file => {
     console.warn(`   ⚠ Warning: ${file} not found`);
   }
 });
+
+// Process server.js - inject MOCKUPS_PATH from env
+const serverJsSrc = path.join(serverSrcDir, 'server.js');
+const serverJsDest = path.join(serverDistDir, 'server.js');
+if (fs.existsSync(serverJsSrc)) {
+  let serverContent = fs.readFileSync(serverJsSrc, 'utf-8');
+  const mockupsPath = envVars.MOCKUPS_PATH || '';
+  // Escape backslashes for Windows paths in the JS string
+  const escapedPath = mockupsPath.replace(/\\/g, '\\\\');
+  serverContent = serverContent.replace('__MOCKUPS_PATH__', escapedPath);
+  fs.writeFileSync(serverJsDest, serverContent);
+  console.log(`   ✓ Processed: server.js (MOCKUPS_PATH: ${mockupsPath})`);
+} else {
+  console.warn('   ⚠ Warning: server.js not found');
+}
 
 // Copy node_modules if it exists
 const serverNodeModules = path.join(serverSrcDir, 'node_modules');
@@ -235,7 +251,8 @@ console.log(`📁 Output: ./dist/ folder\n`);
 console.log(`🌍 Environment: ${env}`);
 console.log(`   API_URL: ${envVars.API_URL}`);
 console.log(`   MOCKUP_SERVER_URL: ${envVars.MOCKUP_SERVER_URL}`);
-console.log(`   WEBSOCKET_URL: ${envVars.WEBSOCKET_URL}\n`);
+console.log(`   WEBSOCKET_URL: ${envVars.WEBSOCKET_URL}`);
+console.log(`   MOCKUPS_PATH: ${envVars.MOCKUPS_PATH}\n`);
 console.log('📦 Components built:');
 console.log('   ✓ dist/chrome-extension/     - Load this in Chrome');
 console.log('   ✓ dist/photoshop-uxp-plugin/ - Load this in UXP Dev Tool');
