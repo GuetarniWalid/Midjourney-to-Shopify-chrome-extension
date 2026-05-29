@@ -86,7 +86,10 @@ function init() {
   clearLogsBtn.addEventListener('click', clearLogs);
 
   console.log('[UXP] Event listeners attached');
-  addLog('info', 'Plugin initialized. Click "Connect to Server" to start.');
+  addLog('info', 'Plugin initialized. Connecting automatically...');
+
+  // Auto-connect on plugin open — no button click required
+  connectToServer();
 }
 
 
@@ -103,12 +106,10 @@ function handleConnectClick() {
 
   if (wsClient && wsClient.isConnected()) {
     console.log('[UXP] Disconnecting...');
-    // Disconnect
     wsClient.disconnect();
     wsClient = null;
   } else {
     console.log('[UXP] Connecting to server...');
-    // Connect
     connectToServer();
   }
 }
@@ -122,7 +123,7 @@ function connectToServer() {
 
   try {
     wsClient = new WebSocketClient({
-      url: 'ws://localhost:8081',
+      url: 'ws://127.0.0.1:8081',
       onConnect: handleConnect,
       onDisconnect: handleDisconnect,
       onMessage: handleMessage,

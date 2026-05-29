@@ -12,7 +12,9 @@ class WebSocketClient {
     this.options = options;
     this.ws = null;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
+    // Retry forever — the local mockup server may not be up yet when
+    // the panel opens. The user can click "Disconnect" to stop retrying.
+    this.maxReconnectAttempts = Infinity;
     this.reconnectDelay = 3000;
     this.isManualDisconnect = false;
   }
@@ -61,6 +63,8 @@ class WebSocketClient {
 
       this.ws.onerror = (event) => {
         console.error('[WebSocketClient] onerror fired:', event);
+        console.error('[WebSocketClient] Error type:', event.type);
+        console.error('[WebSocketClient] Error message:', event.message || 'none');
         const error = new Error('WebSocket error occurred');
         this.log('error', error.message);
         if (this.options.onError) {
@@ -69,8 +73,8 @@ class WebSocketClient {
       };
 
       this.ws.onclose = (event) => {
-        console.log('[WebSocketClient] onclose fired:', event);
-        this.log('warning', 'Disconnected from WebSocket server');
+        console.log('[WebSocketClient] onclose fired, code:', event.code, 'reason:', event.reason, 'wasClean:', event.wasClean);
+        this.log('warning', `Disconnected from WebSocket server (code: ${event.code}, reason: ${event.reason || 'none'})`);
         if (this.options.onDisconnect) {
           this.options.onDisconnect();
         }
