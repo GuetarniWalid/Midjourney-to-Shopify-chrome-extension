@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>MyselfMonArt · Publisher</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- En-tête -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◈</span>
+      <span>MyselfMonArt <em>Publisher</em></span>
+    </div>
+    <div id="orientationBadge" class="badge hidden"></div>
+  </header>
+
+  <main class="content">
+
+    <!-- 1. Upload -->
+    <section class="card" id="uploadCard">
+      <h2 class="card-title">1 · Votre image</h2>
+      <label id="dropzone" class="dropzone" for="fileInput">
+        <input type="file" id="fileInput" accept="image/*" hidden>
+        <div class="dz-inner" id="dzInner">
+          <div class="dz-icon">⬆</div>
+          <div class="dz-text"><b>Touchez pour choisir</b><span>ou glissez une image ici</span></div>
+        </div>
+        <img id="sourcePreview" class="source-preview hidden" alt="aperçu">
+      </label>
+      <button id="changeImageBtn" class="ghost-btn hidden">Changer d'image</button>
+    </section>
+
+    <!-- 2. Paramètres -->
+    <section class="card" id="paramsCard">
+      <h2 class="card-title">2 · Produit & collection</h2>
+
+      <div class="seg" id="productType">
+        <button class="seg-btn active" data-type="toile">Toile</button>
+        <button class="seg-btn" data-type="poster">Poster</button>
+        <button class="seg-btn" data-type="tapisserie">Tapisserie</button>
+      </div>
+
+      <div class="field">
+        <label>Collection parente</label>
+        <div class="combo">
+          <input type="text" id="collectionSearch" placeholder="Rechercher une collection…" autocomplete="off">
+          <div id="collectionList" class="combo-list hidden"></div>
+        </div>
+        <div id="collectionChosen" class="chosen hidden"></div>
+      </div>
+    </section>
+
+    <!-- 3. Mockups -->
+    <section class="card" id="mockupsCard">
+      <div class="card-head">
+        <h2 class="card-title">3 · Mockups</h2>
+        <span id="mockupsHint" class="hint">Choisissez une image d'abord</span>
+      </div>
+      <div id="mockupGrid" class="mockup-grid"></div>
+    </section>
+
+    <!-- 4. Résultats -->
+    <section class="card" id="resultsCard">
+      <div class="card-head">
+        <h2 class="card-title">4 · Rendus générés</h2>
+        <span class="hint">Glissez pour réorganiser</span>
+      </div>
+      <div id="resultsGrid" class="results-grid"></div>
+      <p id="resultsEmpty" class="empty">Aucun rendu pour l'instant. Touchez un mockup ci-dessus pour générer.</p>
+    </section>
+
+  </main>
+
+  <!-- Barre d'action fixe -->
+  <footer class="actionbar">
+    <div class="action-info" id="actionInfo">—</div>
+    <button id="publishBtn" class="primary-btn" disabled>Publier</button>
+  </footer>
+
+  <!-- Overlay agrandissement -->
+  <div id="lightbox" class="lightbox hidden"><img id="lightboxImg" alt=""><button class="lb-close">✕</button></div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+</div>
+<!-- Config : en local, tout est sur le même serveur (vide = même origine).
+     Quand la page est servie par le backend, celui-ci remplace cette config (voir publisher.edge). -->
+<script>window.PUBLISHER_CONFIG = window.PUBLISHER_CONFIG || { renderBase: '', apiBase: '' };</script>
+<script src="app.js"></script>
+</body>
+</html>
