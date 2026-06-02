@@ -155,7 +155,9 @@ async function callResize(quality) {
     throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
   }
   const startedAt = Date.now()
-  const MAX_MS = 9 * 60 * 1000 // garde-fou navigateur
+  // garde-fou navigateur : DOIT dépasser le timeout OpenAI back (580s) sinon on abandonnerait
+  // un job que le worker va finir avec succès (résultat payant gâché). Reste sous le TTL serveur (15min).
+  const MAX_MS = 11 * 60 * 1000
   let netErrors = 0
   while (true) {
     if (Date.now() - startedAt > MAX_MS) throw new Error('Le redimensionnement a expiré. Réessaye.')
