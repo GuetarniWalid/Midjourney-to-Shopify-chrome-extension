@@ -131,17 +131,50 @@ function updateRatioUI() {
 
 /* ---------- Retaillage de l'œuvre via GPT-image (preview low -> valider high) ---------- */
 let lastResizedImage = null // dernier résultat (data URI) en attente de validation
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+// Cloudflare peut renvoyer une page HTML (524/502) au lieu de JSON -> parse défensif
+async function safeJson(res) {
+  try {
+    return await res.json()
+  } catch {
+    return {}
+  }
+}
+// Redimensionnement ASYNCHRONE : on démarre un job (réponse immédiate) puis on
+// interroge son état en boucle. Chaque requête est courte -> jamais de 524 Cloudflare,
+// quelle que soit la durée réelle de gpt-image-2.
 async function callResize(quality) {
-  const r = await fetch(API + '/api/resize-artwork', {
+  const startRes = await fetch(API + '/api/resize-artwork', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ image: state.imageDataUrl, target: state.orientation, quality }),
   })
-  const data = await r.json().catch(() => ({}))
-  if (!r.ok || !data.success) {
-    throw new Error(data.message || data.error || 'Erreur serveur (' + r.status + ')')
+  const startData = await safeJson(startRes)
+  const jobId = startData.data && startData.data.jobId
+  if (!startRes.ok || !startData.success || !jobId) {
+    throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
   }
-  return data.data.image
+  const startedAt = Date.now()
+  const MAX_MS = 9 * 60 * 1000 // garde-fou navigateur
+  let netErrors = 0
+  while (true) {
+    if (Date.now() - startedAt > MAX_MS) throw new Error('Le redimensionnement a expiré. Réessaye.')
+    await sleep(quality === 'high' ? 3000 : 2000)
+    let res, data
+    try {
+      res = await fetch(API + '/api/resize-artwork/result?id=' + encodeURIComponent(jobId))
+      data = await safeJson(res)
+    } catch (e) {
+      if (++netErrors > 6) throw new Error('Connexion interrompue pendant la génération.')
+      continue // coupure réseau transitoire -> on retente
+    }
+    netErrors = 0
+    if (res.status === 404 || data.status === 'not_found')
+      throw new Error('Session de génération expirée. Relance.')
+    if (data.status === 'error') throw new Error(data.message || 'Échec du redimensionnement.')
+    if (data.status === 'done' && data.data && data.data.image) return data.data.image
+    // sinon: pending -> on continue la boucle
+  }
 }
 function showResizeLoading(msg) {
   $('#resizeLoading').classList.remove('hidden')
