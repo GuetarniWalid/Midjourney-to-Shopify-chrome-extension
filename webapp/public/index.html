@@ -30,9 +30,16 @@
           <div class="dz-icon">⬆</div>
           <div class="dz-text"><b>Touchez pour choisir</b><span>ou glissez une image ici</span></div>
         </div>
-        <img id="sourcePreview" class="source-preview hidden" alt="aperçu">
+        <div class="preview-wrap">
+          <img id="sourcePreview" class="source-preview hidden" alt="aperçu">
+          <div id="ratioOverlay" class="ratio-overlay hidden"></div>
+        </div>
       </label>
-      <button id="changeImageBtn" class="ghost-btn hidden">Changer d'image</button>
+      <p id="ratioWarning" class="ratio-warning hidden">⚠️ Format non conforme — le cadre pointillé montre le format attendu.</p>
+      <div class="upload-actions">
+        <button id="changeImageBtn" class="ghost-btn hidden">Changer d'image</button>
+        <button id="resizeBtn" class="accent-btn hidden">Retailler au bon format</button>
+      </div>
     </section>
 
     <!-- 2. Paramètres -->
@@ -87,6 +94,31 @@
 
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
+
+  <!-- Overlay de retaillage (preview avant/après GPT-image) -->
+  <div id="resizeOverlay" class="resize-overlay hidden">
+    <div class="resize-card">
+      <h3 id="resizeTitle">Retaillage de l'œuvre</h3>
+      <div class="resize-body">
+        <div id="resizeLoading" class="resize-loading">
+          <div class="progress-ring"></div>
+          <p id="resizeLoadingMsg">Génération de l'aperçu…</p>
+        </div>
+        <div id="resizeCompare" class="resize-compare hidden">
+          <div class="rc-col"><span>Avant</span><img id="resizeBefore" alt="avant"></div>
+          <div class="rc-col"><span>Après</span><img id="resizeAfter" alt="après"></div>
+        </div>
+      </div>
+      <div id="resizeActions" class="resize-actions hidden">
+        <button id="resizeValidate" class="primary-btn">Valider (haute qualité)</button>
+        <button id="resizeRetry" class="ghost-btn">Relancer</button>
+        <button id="resizeCancel" class="ghost-btn">Annuler</button>
+      </div>
+      <div id="resizeFinal" class="resize-actions hidden">
+        <button id="resizeClose" class="primary-btn">Parfait, utiliser cette image</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Overlay de progression (publication) -->
   <div id="progress" class="progress-overlay hidden">
