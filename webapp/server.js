@@ -12,7 +12,7 @@ const { PhotopeaEngine } = require('./photopea-engine');
 
 // ---- Config (via variables d'environnement) ----
 const PORT = process.env.PORT || 4000;
-const MOCKUPS_PATH = process.env.MOCKUPS_PATH || String.raw`C:\Users\gueta\Downloads\mockups`;
+const MOCKUPS_PATH = process.env.MOCKUPS_PATH || String.raw`C:\Users\gueta\Documents\MyselfMonArt - Mockups (templates PSD)`;
 const UPLOADS = path.join(__dirname, 'uploads');
 fs.mkdirSync(UPLOADS, { recursive: true });
 
