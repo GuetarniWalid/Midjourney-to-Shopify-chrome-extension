@@ -87,6 +87,18 @@
 
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
+
+  <!-- Overlay de progression (publication) -->
+  <div id="progress" class="progress-overlay hidden">
+    <div class="progress-card">
+      <div id="progressSpinner" class="progress-ring"></div>
+      <div id="progressIcon" class="progress-icon hidden"></div>
+      <h3 id="progressTitle">Publication en cours…</h3>
+      <p id="progressMsg">Préparation des images…</p>
+      <button id="progressClose" class="primary-btn hidden">Fermer</button>
+      <a id="progressLink" class="ghost-btn hidden" target="_blank" rel="noopener">Voir le produit</a>
+    </div>
+  </div>
 </div>
 <!-- Config : en local, tout est sur le même serveur (vide = même origine).
      Quand la page est servie par le backend, celui-ci remplace cette config (voir publisher.edge). -->

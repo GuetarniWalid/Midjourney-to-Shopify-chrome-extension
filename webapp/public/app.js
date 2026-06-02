@@ -246,14 +246,14 @@ function onDragEnd(e) {
   document.removeEventListener('pointerup', onDragEnd);
   document.removeEventListener('pointercancel', onDragEnd);
   const cur = drag; drag = null;
+  $$('.result-cell').forEach(c => c.classList.remove('over'));
+  cur.cell.classList.remove('dragging');
   if (cur.moved) {
     const el = document.elementFromPoint(e.clientX, e.clientY);
     const target = el && el.closest('.result-cell');
-    $$('.result-cell').forEach(c => c.classList.remove('over'));
-    cur.cell.classList.remove('dragging');
     if (target && target.dataset.id !== cur.id) reorder(cur.id, target.dataset.id);
-  } else if (e.type === 'pointerup') {
-    openLightbox(cur.res.url);              // pas bougé = clic = agrandir
+  } else {
+    openLightbox(cur.res.url);              // pas de glissement = tap/clic = agrandir (souris + tactile)
   }
 }
 function attachDrag(cell, res) {
@@ -269,8 +269,37 @@ function attachDrag(cell, res) {
 
 /* ---------- Lightbox ---------- */
 const lightbox = $('#lightbox');
-function openLightbox(url) { $('#lightboxImg').src = url; lightbox.classList.remove('hidden'); }
-lightbox.addEventListener('click', () => lightbox.classList.add('hidden'));
+let lightboxOpenedAt = 0;
+function openLightbox(url) { $('#lightboxImg').src = url; lightbox.classList.remove('hidden'); lightboxOpenedAt = Date.now(); }
+// ignore le "ghost click" tactile généré juste après l'ouverture (sinon fermeture immédiate sur mobile)
+lightbox.addEventListener('click', () => { if (Date.now() - lightboxOpenedAt > 350) lightbox.classList.add('hidden'); });
+
+/* ---------- Overlay de progression (publication) ---------- */
+const progress = {
+  el: $('#progress'),
+  show(msg) {
+    $('#progressSpinner').classList.remove('hidden'); $('#progressIcon').classList.add('hidden');
+    $('#progressClose').classList.add('hidden'); $('#progressLink').classList.add('hidden');
+    $('#progressTitle').textContent = 'Publication en cours…'; $('#progressMsg').textContent = msg || '';
+    this.el.classList.remove('hidden');
+  },
+  step(msg) { $('#progressMsg').textContent = msg; },
+  done(title, link) {
+    $('#progressSpinner').classList.add('hidden');
+    const ic = $('#progressIcon'); ic.className = 'progress-icon ok'; ic.textContent = '✓';
+    $('#progressTitle').textContent = title || 'Produit publié ✓'; $('#progressMsg').textContent = '';
+    if (link) { const a = $('#progressLink'); a.href = link; a.classList.remove('hidden'); }
+    $('#progressClose').classList.remove('hidden');
+  },
+  fail(msg) {
+    $('#progressSpinner').classList.add('hidden');
+    const ic = $('#progressIcon'); ic.className = 'progress-icon err'; ic.textContent = '✕';
+    $('#progressTitle').textContent = 'Échec de la publication'; $('#progressMsg').textContent = msg || 'Une erreur est survenue.';
+    $('#progressClose').classList.remove('hidden');
+  },
+  hide() { this.el.classList.add('hidden'); },
+};
+$('#progressClose').addEventListener('click', () => progress.hide());
 
 /* ---------- Publication ---------- */
 function refreshAction() {
@@ -285,12 +314,18 @@ function refreshAction() {
 }
 
 $('#publishBtn').addEventListener('click', async () => {
-  const btn = $('#publishBtn'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Publication…';
+  const btn = $('#publishBtn'); if (btn.disabled) return; btn.disabled = true;
+  progress.show('Préparation des images…');
   try {
     // ordre: [mockup1, original, mockup2, ...]
     const imgs = [];
-    const toB64 = async u => { const b = await (await fetch(u)).blob(); return await new Promise(r => { const fr = new FileReader(); fr.onloadend = () => r(fr.result); fr.readAsDataURL(b); }); };
+    const toB64 = async u => {
+      const resp = await fetch(u); if (!resp.ok) throw new Error('image introuvable (' + resp.status + ')');
+      const b = await resp.blob();
+      return await new Promise((r, rej) => { const fr = new FileReader(); fr.onloadend = () => r(fr.result); fr.onerror = () => rej(new Error('lecture image échouée')); fr.readAsDataURL(b); });
+    };
     for (let i = 0; i < state.results.length; i++) {
+      progress.step(`Préparation des images… (${i + 1}/${state.results.length})`);
       imgs.push({ base64Image: await toB64(state.results[i].url), type: 'mockup', mockupContext: state.results[i].context });
       if (i === 0) imgs.push({ base64Image: state.imageDataUrl, type: 'original' });
     }
@@ -298,11 +333,22 @@ $('#publishBtn').addEventListener('click', async () => {
       images: imgs, ratio: state.orientation, productType: TYPE_MAP[state.productType],
       parentCollection: { id: state.collection.id, title: state.collection.title },
     };
-    const r = await fetch(API + '/api/shopify-product-publisher/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || ('HTTP ' + r.status)); }
-    toast('Produit publié ✓', 'ok');
-  } catch (e) { toast('Publication : ' + e.message, 'err'); }
-  finally { btn.textContent = old; refreshAction(); }
+    progress.step('Création du produit sur Shopify… (jusqu’à 1 min)');
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 180000);
+    let r;
+    try {
+      r = await fetch(API + '/api/shopify-product-publisher/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal });
+    } catch (netErr) {
+      throw new Error(netErr.name === 'AbortError' ? 'Délai dépassé (serveur trop long à répondre).' : 'Connexion au serveur impossible.');
+    } finally { clearTimeout(timer); }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || data.success === false) {
+      throw new Error(data.message || data.error || (data.errors ? JSON.stringify(data.errors) : 'Erreur serveur (HTTP ' + r.status + ')'));
+    }
+    progress.done('Produit publié ✓', data.data && data.data.link);
+    clearResults();
+  } catch (e) { progress.fail(e.message); }
+  finally { refreshAction(); }
 });
 
 /* ---------- utils + init ---------- */

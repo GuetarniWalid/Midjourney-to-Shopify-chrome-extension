@@ -120,3 +120,16 @@ body{
 /* spinner */
 .loader{width:26px;height:26px;border:3px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---- overlay de progression (publication) ---- */
+.progress-overlay{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);display:grid;place-items:center;padding:24px;animation:fade .2s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.progress-card{background:var(--surface);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);padding:30px 26px;max-width:340px;width:100%;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px}
+.progress-card h3{margin:14px 0 0;font-size:17px;color:var(--text)}
+.progress-card p{margin:2px 0 0;font-size:14px;color:var(--muted);min-height:20px;transition:.2s}
+.progress-ring{width:56px;height:56px;border:5px solid rgba(255,255,255,.15);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+.progress-icon{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;font-size:30px;color:#fff;animation:pop .3s ease}
+@keyframes pop{0%{transform:scale(.4);opacity:0}100%{transform:scale(1);opacity:1}}
+.progress-icon.ok{background:var(--ok)}
+.progress-icon.err{background:var(--danger)}
+.progress-card .primary-btn,.progress-card .ghost-btn{margin-top:14px;width:100%;text-align:center;text-decoration:none}
