@@ -85,10 +85,40 @@ class PhotopeaEngine {
     throw new Error('timeout: ' + expr);
   }
 
+  // Vérifie que le navigateur + l'iframe Photopea répondent ; sinon relance tout (auto-réparation).
+  async _ensureHealthy() {
+    let ok = false;
+    try {
+      ok = this.ready && this.browser && this.browser.isConnected() && this.page && !this.page.isClosed()
+        && (await this.page.evaluate(() => typeof window.ppSend === 'function').catch(() => false));
+    } catch { ok = false; }
+    if (ok) return;
+    console.log('[photopea] navigateur/iframe KO -> relance du moteur…');
+    try { if (this.browser) await this.browser.close(); } catch {}
+    this.ready = false; this.browser = null; this.page = null;
+    if (this._server) { try { this._server.close(); } catch {} this._server = null; }
+    await this.start();
+  }
+
   // Rend un mockup. psdBuffer = Buffer du PSD ; artworkBuffer/artMime = l'oeuvre. Retourne un Buffer JPEG.
+  // Sérialisé (un rendu à la fois) + auto-réparation + 1 retry si l'iframe s'est détachée.
   render(psdBuffer, artworkBuffer, artMime = 'image/jpeg', quality = 0.92) {
-    // sérialisé : on chaîne sur la queue pour ne traiter qu'un rendu à la fois
-    const task = this.queue.then(() => this._renderNow(psdBuffer, artworkBuffer, artMime, quality));
+    const run = async () => {
+      await this._ensureHealthy();
+      try {
+        return await this._renderNow(psdBuffer, artworkBuffer, artMime, quality);
+      } catch (e) {
+        // erreurs typiques d'un navigateur/iframe mort -> on relance et on réessaie une fois
+        if (/detached|Target closed|Session closed|Execution context|Protocol error|Navigation/i.test(e.message || '')) {
+          console.log('[photopea] erreur navigateur (', e.message, ') -> relance + retry');
+          this.ready = false;
+          await this._ensureHealthy();
+          return await this._renderNow(psdBuffer, artworkBuffer, artMime, quality);
+        }
+        throw e;
+      }
+    };
+    const task = this.queue.then(run);
     this.queue = task.catch(() => {}); // la queue ne doit jamais se bloquer sur une erreur
     return task;
   }
