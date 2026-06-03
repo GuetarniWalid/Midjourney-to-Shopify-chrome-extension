@@ -69,6 +69,7 @@
         <span id="mockupsHint" class="hint">Choisissez une image d'abord</span>
       </div>
       <div id="mockupGrid" class="mockup-grid"></div>
+      <button id="decorBtn" class="ghost-btn decor-cta hidden">🎨 Générer un décor sur-mesure (IA)</button>
     </section>
 
     <!-- 4. Résultats -->
@@ -117,6 +118,27 @@
       <div id="resizeFinal" class="resize-actions hidden">
         <button id="resizeClose" class="primary-btn">Parfait, utiliser cette image</button>
         <button id="resizeRegenHigh" class="ghost-btn">Régénérer en haute qualité</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay de génération de décor IA -->
+  <div id="decorOverlay" class="resize-overlay hidden">
+    <div class="resize-card">
+      <h3>Décor sur-mesure (IA)</h3>
+      <div class="resize-body">
+        <div id="decorLoading" class="resize-loading">
+          <div class="progress-ring"></div>
+          <p id="decorLoadingMsg">Génération du décor…</p>
+        </div>
+        <div id="decorResult" class="decor-result hidden">
+          <img id="decorImg" alt="décor généré">
+        </div>
+      </div>
+      <div id="decorActions" class="resize-actions hidden">
+        <button id="decorValidate" class="primary-btn">Valider ce décor</button>
+        <button id="decorRegen" class="ghost-btn">Régénérer</button>
+        <button id="decorCancel" class="ghost-btn">Annuler</button>
       </div>
     </div>
   </div>

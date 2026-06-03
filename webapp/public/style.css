@@ -75,6 +75,8 @@ body{
 .rc-col img{width:100%;border-radius:10px;border:1px solid var(--line);background:var(--surface2)}
 .resize-actions{display:flex;flex-direction:column;gap:10px;margin-top:16px}
 .resize-actions .primary-btn,.resize-actions .ghost-btn{width:100%;margin-top:0}
+.decor-cta{margin-top:12px}
+.decor-result img{width:100%;border-radius:10px;border:1px solid var(--line);display:block}
 .ghost-btn{margin-top:12px;width:100%;padding:11px;border-radius:11px;border:1px solid var(--line);background:transparent;color:var(--text);font-weight:600;cursor:pointer}
 .ghost-btn:active{background:var(--surface2)}
 

@@ -251,6 +251,78 @@ function applyResizedImage(dataUrl) {
   img.src = dataUrl
 }
 
+/* ---------- Décor IA : génère un intérieur + cadre VIDE (full IA), l'œuvre s'insère à l'étape suivante ---------- */
+let lastDecor = null // dernier décor généré (data URI), en attente de validation
+function showDecorLoading(msg) {
+  $('#decorLoading').classList.remove('hidden')
+  $('#decorLoadingMsg').textContent = msg
+  $('#decorResult').classList.add('hidden')
+  $('#decorActions').classList.add('hidden')
+}
+// démarre le job de génération de décor puis interroge son état (job + polling -> jamais de 524)
+async function callDecorJob(body) {
+  const startRes = await fetch(API + '/api/generate-decor', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const startData = await safeJson(startRes)
+  const jobId = startData.data && startData.data.jobId
+  if (!startRes.ok || !startData.success || !jobId) {
+    throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
+  }
+  const startedAt = Date.now()
+  const MAX_MS = 11 * 60 * 1000
+  let netErrors = 0
+  while (true) {
+    if (Date.now() - startedAt > MAX_MS) throw new Error('La génération du décor a expiré. Réessaye.')
+    await sleep(3000)
+    let res, data
+    try {
+      res = await fetch(API + '/api/generate-decor/result?id=' + encodeURIComponent(jobId))
+      data = await safeJson(res)
+    } catch (e) {
+      if (++netErrors > 6) throw new Error('Connexion interrompue pendant la génération.')
+      continue
+    }
+    netErrors = 0
+    if (res.status === 404 || data.status === 'not_found')
+      throw new Error('Session de génération expirée. Relance.')
+    if (data.status === 'error') throw new Error(data.message || 'Échec de la génération du décor.')
+    if (data.status === 'done' && data.data && data.data.image) return data.data.image
+  }
+}
+async function runDecorGenerate() {
+  if (!state.imageDataUrl) return toast("Choisis une image d'abord", 'err')
+  if (state.needsResize) return toast("Retaille d'abord l'image au bon format", 'err')
+  $('#decorOverlay').classList.remove('hidden')
+  showDecorLoading('Génération du décor sur-mesure… (~1-2 min)')
+  try {
+    const product =
+      state.productType === 'poster' ? 'poster' : state.productType === 'tapisserie' ? 'tapestry' : 'canvas'
+    lastDecor = await callDecorJob({ image: state.imageDataUrl, target: state.orientation, product })
+    $('#decorImg').src = lastDecor
+    $('#decorLoading').classList.add('hidden')
+    $('#decorResult').classList.remove('hidden')
+    $('#decorActions').classList.remove('hidden')
+  } catch (e) {
+    $('#decorOverlay').classList.add('hidden')
+    toast('Décor : ' + e.message, 'err')
+  }
+}
+$('#decorBtn').addEventListener('click', runDecorGenerate)
+$('#decorRegen').addEventListener('click', runDecorGenerate)
+$('#decorCancel').addEventListener('click', () => {
+  $('#decorOverlay').classList.add('hidden')
+  lastDecor = null
+})
+// Étape 1 : on garde le décor validé. L'INSERTION de l'œuvre dedans sera l'étape 2.
+$('#decorValidate').addEventListener('click', () => {
+  state.decor = lastDecor
+  $('#decorOverlay').classList.add('hidden')
+  toast("Décor validé ✓ — insertion de l'œuvre à l'étape suivante", 'ok')
+})
+
 /* ---------- 2. Type produit + collections ---------- */
 $$('#productType .seg-btn').forEach((btn) =>
   btn.addEventListener('click', () => {
@@ -356,6 +428,8 @@ function renderMockups() {
     hint = $('#mockupsHint')
   grid.innerHTML = ''
   grid.classList.toggle('disabled', !!state.needsResize) // bloque les clics tant que format non conforme
+  const decorBtn = $('#decorBtn')
+  if (decorBtn) decorBtn.classList.toggle('hidden', !(state.orientation && !state.needsResize))
   if (!state.orientation) {
     hint.textContent = "Choisissez une image d'abord"
     return
