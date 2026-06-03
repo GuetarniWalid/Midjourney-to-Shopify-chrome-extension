@@ -74,6 +74,9 @@ function loadImageFile(file) {
       sourcePreview.classList.remove('hidden')
       dzInner.classList.add('hidden')
       changeBtn.classList.remove('hidden')
+      const dv = $('#decorVibe')
+      if (dv) dv.value = '' // reset l'orientation décor entre deux œuvres
+      state.decor = null
       renderMockups()
       refreshAction()
     }
@@ -258,6 +261,7 @@ function showDecorLoading(msg) {
   $('#decorLoadingMsg').textContent = msg
   $('#decorResult').classList.add('hidden')
   $('#decorActions').classList.add('hidden')
+  $('#decorStartActions').classList.add('hidden')
 }
 // démarre le job de génération de décor puis interroge son état (job + polling -> jamais de 524)
 async function callDecorJob(body) {
@@ -292,29 +296,51 @@ async function callDecorJob(body) {
     if (data.status === 'done' && data.data && data.data.image) return data.data.image
   }
 }
-async function runDecorGenerate() {
+// Ouvre l'overlay en état "prêt" : le champ d'orientation + le bouton Générer sont visibles
+// AVANT toute génération (on peut donc orienter dès le 1er décor).
+function openDecorOverlay() {
   if (!state.imageDataUrl) return toast("Choisis une image d'abord", 'err')
   if (state.needsResize) return toast("Retaille d'abord l'image au bon format", 'err')
   $('#decorOverlay').classList.remove('hidden')
+  $('#decorLoading').classList.add('hidden')
+  $('#decorResult').classList.add('hidden')
+  $('#decorActions').classList.add('hidden')
+  $('#decorStartActions').classList.remove('hidden')
+}
+async function runDecorGenerate() {
+  if (!state.imageDataUrl) return toast("Choisis une image d'abord", 'err')
+  if (state.needsResize) return toast("Retaille d'abord l'image au bon format", 'err')
   showDecorLoading('Génération du décor sur-mesure… (~1-2 min)')
   try {
     const product =
       state.productType === 'poster' ? 'poster' : state.productType === 'tapisserie' ? 'tapestry' : 'canvas'
-    lastDecor = await callDecorJob({ image: state.imageDataUrl, target: state.orientation, product })
+    const vibeEl = $('#decorVibe')
+    const direction = vibeEl ? vibeEl.value.trim() : '' // orientation libre (raffinée côté serveur)
+    lastDecor = await callDecorJob({
+      image: state.imageDataUrl,
+      target: state.orientation,
+      product,
+      theme: direction,
+    })
     $('#decorImg').src = lastDecor
     $('#decorLoading').classList.add('hidden')
     $('#decorResult').classList.remove('hidden')
     $('#decorActions').classList.remove('hidden')
   } catch (e) {
-    $('#decorOverlay').classList.add('hidden')
+    $('#decorLoading').classList.add('hidden')
+    $('#decorStartActions').classList.remove('hidden') // retour à l'état prêt -> re-tentable
     toast('Décor : ' + e.message, 'err')
   }
 }
-$('#decorBtn').addEventListener('click', runDecorGenerate)
+$('#decorBtn').addEventListener('click', openDecorOverlay)
+$('#decorGenerate').addEventListener('click', runDecorGenerate)
 $('#decorRegen').addEventListener('click', runDecorGenerate)
 $('#decorCancel').addEventListener('click', () => {
   $('#decorOverlay').classList.add('hidden')
   lastDecor = null
+})
+$('#decorClose').addEventListener('click', () => {
+  $('#decorOverlay').classList.add('hidden')
 })
 // Étape 1 : on garde le décor validé. L'INSERTION de l'œuvre dedans sera l'étape 2.
 $('#decorValidate').addEventListener('click', () => {

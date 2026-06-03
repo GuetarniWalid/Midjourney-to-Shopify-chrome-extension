@@ -127,7 +127,8 @@
     <div class="resize-card">
       <h3>Décor sur-mesure (IA)</h3>
       <div class="resize-body">
-        <div id="decorLoading" class="resize-loading">
+        <input id="decorVibe" class="decor-vibe" type="text" maxlength="200" placeholder="Oriente le décor (optionnel) : ex. tons rose pâle, vintage bobo chic…">
+        <div id="decorLoading" class="resize-loading hidden">
           <div class="progress-ring"></div>
           <p id="decorLoadingMsg">Génération du décor…</p>
         </div>
@@ -135,10 +136,14 @@
           <img id="decorImg" alt="décor généré">
         </div>
       </div>
+      <div id="decorStartActions" class="resize-actions">
+        <button id="decorGenerate" class="primary-btn">Générer le décor</button>
+        <button id="decorCancel" class="ghost-btn">Annuler</button>
+      </div>
       <div id="decorActions" class="resize-actions hidden">
         <button id="decorValidate" class="primary-btn">Valider ce décor</button>
         <button id="decorRegen" class="ghost-btn">Régénérer</button>
-        <button id="decorCancel" class="ghost-btn">Annuler</button>
+        <button id="decorClose" class="ghost-btn">Fermer</button>
       </div>
     </div>
   </div>
