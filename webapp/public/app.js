@@ -143,11 +143,19 @@ async function safeJson(res) {
 // Redimensionnement ASYNCHRONE : on démarre un job (réponse immédiate) puis on
 // interroge son état en boucle. Chaque requête est courte -> jamais de 524 Cloudflare,
 // quelle que soit la durée réelle de gpt-image-2.
-async function callResize(quality) {
+// quality 'low'|'high' ; sourceImage = image à envoyer (défaut = l'originale uploadée) ;
+// mode 'recompose' (recomposer l'original pour remplir le cadre) ou 'enhance' (re-rendu FIDÈLE
+// de l'aperçu LOW déjà validé -> le HIGH est exactement le LOW validé, pas une nouvelle image).
+async function callResize(quality, sourceImage, mode) {
   const startRes = await fetch(API + '/api/resize-artwork', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: state.imageDataUrl, target: state.orientation, quality }),
+    body: JSON.stringify({
+      image: sourceImage || state.imageDataUrl,
+      target: state.orientation,
+      quality,
+      mode: mode || 'recompose',
+    }),
   })
   const startData = await safeJson(startRes)
   const jobId = startData.data && startData.data.jobId
@@ -196,28 +204,39 @@ async function runResizePreview() {
     $('#resizeCompare').classList.remove('hidden')
     $('#resizeActions').classList.remove('hidden')
   } catch (e) {
-    $('#resizeLoadingMsg').textContent = 'Échec : ' + e.message
-    setTimeout(() => $('#resizeOverlay').classList.add('hidden'), 3000)
+    $('#resizeOverlay').classList.add('hidden')
+    toast("Échec de l'aperçu : " + e.message, 'err')
   }
 }
 $('#resizeBtn').addEventListener('click', runResizePreview)
 $('#resizeRetry').addEventListener('click', runResizePreview)
 $('#resizeCancel').addEventListener('click', () => { $('#resizeOverlay').classList.add('hidden'); lastResizedImage = null })
-// Valider : on régénère en HAUTE qualité, puis on remplace l'image source
-$('#resizeValidate').addEventListener('click', async () => {
+// HIGH = on AMÉLIORE l'aperçu LOW déjà validé (envoyé comme image source, mode 'enhance') pour
+// obtenir EXACTEMENT la même image en haute qualité, sans recomposition ni retouche créative.
+// Le re-roll repart TOUJOURS du LOW validé (jamais d'une sortie HIGH) -> pas de dégradation cumulative.
+async function runResizeHigh() {
+  if (!lastResizedImage) return runResizePreview() // sécurité : pas d'aperçu validé -> on (re)fait l'aperçu
   showResizeLoading('Génération en haute qualité… (peut prendre 1-2 min)')
   try {
-    const hi = await callResize('high')
+    const hi = await callResize('high', lastResizedImage, 'enhance')
     applyResizedImage(hi)
-    $('#resizeCompare').classList.remove('hidden')
+    $('#resizeBefore').src = lastResizedImage // compare l'aperçu validé (gauche) au rendu HQ (droite)
     $('#resizeAfter').src = hi
+    $('#resizeCompare').classList.remove('hidden')
     $('#resizeLoading').classList.add('hidden')
     $('#resizeFinal').classList.remove('hidden')
   } catch (e) {
-    $('#resizeLoadingMsg').textContent = 'Échec : ' + e.message
+    // récupération propre : on stoppe le spinner et on revient aux actions (re-tentable)
+    $('#resizeLoading').classList.add('hidden')
+    $('#resizeAfter').src = lastResizedImage // ré-affiche l'aperçu validé
+    $('#resizeCompare').classList.remove('hidden')
     $('#resizeActions').classList.remove('hidden')
+    toast('Échec haute qualité : ' + e.message, 'err')
   }
-})
+}
+// Valider ET re-roll utilisent le même chemin (re-rendu fidèle depuis le LOW validé)
+$('#resizeValidate').addEventListener('click', runResizeHigh)
+$('#resizeRegenHigh').addEventListener('click', runResizeHigh)
 $('#resizeClose').addEventListener('click', () => { $('#resizeOverlay').classList.add('hidden') })
 // Remplace l'image uploadée par la version retaillée et relance la détection
 function applyResizedImage(dataUrl) {
