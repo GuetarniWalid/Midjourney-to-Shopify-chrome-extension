@@ -355,6 +355,7 @@ function renderMockups() {
   const grid = $('#mockupGrid'),
     hint = $('#mockupsHint')
   grid.innerHTML = ''
+  grid.classList.toggle('disabled', !!state.needsResize) // bloque les clics tant que format non conforme
   if (!state.orientation) {
     hint.textContent = "Choisissez une image d'abord"
     return
@@ -379,17 +380,23 @@ function renderMockups() {
       count++
     }
   }
-  hint.textContent = count
-    ? `${count} mockup(s) en ${labelOri(ori)}`
-    : 'Aucun mockup pour cette orientation'
-  if (!count)
-    grid.innerHTML = `<div class="mockup-empty">Aucun mockup disponible en ${labelOri(ori)}.</div>`
+  if (state.needsResize) {
+    hint.textContent = "⚠️ Retaille l'image au bon format pour débloquer les mockups"
+  } else {
+    hint.textContent = count
+      ? `${count} mockup(s) en ${labelOri(ori)}`
+      : 'Aucun mockup pour cette orientation'
+    if (!count)
+      grid.innerHTML = `<div class="mockup-empty">Aucun mockup disponible en ${labelOri(ori)}.</div>`
+  }
 }
 const labelOri = (o) => ({ portrait: 'portrait', landscape: 'paysage', square: 'carré' })[o] || o
 
 /* ---------- Génération via Photopea (serveur) ---------- */
 async function generate(catName, sub, layout, cell) {
   if (!state.imageDataUrl) return toast('Choisissez une image', 'err')
+  if (state.needsResize)
+    return toast("Retaille d'abord l'image au bon format (3:4, carré ou 4:3)", 'err')
   cell.classList.add('busy')
   const spin = document.createElement('div')
   spin.className = 'spin'
@@ -578,6 +585,12 @@ function refreshAction() {
   if (state.orientation) parts.push(labelOri(state.orientation))
   if (state.collection) parts.push(state.collection.title)
   parts.push(`${n} rendu${n > 1 ? 's' : ''}`)
+  if (state.needsResize) {
+    // bloqué tant que l'image n'est pas au bon format (3:4 / carré / 4:3)
+    info.textContent = "⚠️ Retaille l'image au bon format pour publier"
+    btn.disabled = true
+    return
+  }
   info.textContent = parts.join(' · ')
   btn.disabled = !(state.collection && n > 0 && state.imageDataUrl)
 }
