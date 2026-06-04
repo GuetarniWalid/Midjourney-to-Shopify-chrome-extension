@@ -342,11 +342,110 @@ $('#decorCancel').addEventListener('click', () => {
 $('#decorClose').addEventListener('click', () => {
   $('#decorOverlay').classList.add('hidden')
 })
-// Étape 1 : on garde le décor validé. L'INSERTION de l'œuvre dedans sera l'étape 2.
+// Étape 1 -> 2 : on garde le décor validé puis on ouvre l'insertion (déclenchement explicite).
 $('#decorValidate').addEventListener('click', () => {
   state.decor = lastDecor
   $('#decorOverlay').classList.add('hidden')
-  toast("Décor validé ✓ — insertion de l'œuvre à l'étape suivante", 'ok')
+  openInsertOverlay()
+})
+
+/* ---------- Étape 2 : insertion de l'œuvre dans le décor validé (Nano Banana / Gemini) ---------- */
+let lastInsert = null // dernier rendu d'insertion (data URI) en attente de validation
+function showInsertLoading(msg) {
+  $('#insertLoading').classList.remove('hidden')
+  $('#insertLoadingMsg').textContent = msg
+  $('#insertResult').classList.add('hidden')
+  $('#insertStartActions').classList.add('hidden')
+  $('#insertActions').classList.add('hidden')
+}
+function openInsertOverlay() {
+  if (!state.decor || !state.imageDataUrl) return toast('Valide d’abord un décor', 'err')
+  $('#insertOverlay').classList.remove('hidden')
+  $('#insertLoading').classList.add('hidden')
+  $('#insertResult').classList.add('hidden')
+  $('#insertActions').classList.add('hidden')
+  $('#insertStartActions').classList.remove('hidden') // "Insérer mon œuvre" + option haute fidélité
+}
+async function callInsertJob(body) {
+  const startRes = await fetch(API + '/api/insert-artwork', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const startData = await safeJson(startRes)
+  const jobId = startData.data && startData.data.jobId
+  if (!startRes.ok || !startData.success || !jobId) {
+    throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
+  }
+  const startedAt = Date.now()
+  const MAX_MS = 11 * 60 * 1000
+  let netErrors = 0
+  while (true) {
+    if (Date.now() - startedAt > MAX_MS) throw new Error('L’insertion a expiré. Réessaye.')
+    await sleep(3000)
+    let res, data
+    try {
+      res = await fetch(API + '/api/insert-artwork/result?id=' + encodeURIComponent(jobId))
+      data = await safeJson(res)
+    } catch (e) {
+      if (++netErrors > 6) throw new Error('Connexion interrompue pendant l’insertion.')
+      continue
+    }
+    netErrors = 0
+    if (res.status === 404 || data.status === 'not_found') throw new Error('Session expirée. Relance.')
+    if (data.status === 'error') throw new Error(data.message || 'Échec de l’insertion.')
+    if (data.status === 'done' && data.data && data.data.image) return data.data.image
+  }
+}
+// Re-roll : repart TOUJOURS du décor validé + l'œuvre d'origine (jamais d'un rendu précédent).
+async function runInsertGenerate() {
+  if (!state.decor || !state.imageDataUrl) return toast('Valide d’abord un décor', 'err')
+  showInsertLoading('Insertion de votre œuvre dans le décor… (~1-2 min)')
+  try {
+    const product =
+      state.productType === 'poster' ? 'poster' : state.productType === 'tapisserie' ? 'tapestry' : 'canvas'
+    const fidelity = $('#insertHighFidelity') && $('#insertHighFidelity').checked ? 'high' : 'standard'
+    lastInsert = await callInsertJob({
+      decor: state.decor,
+      artwork: state.imageDataUrl,
+      target: state.orientation,
+      product,
+      fidelity,
+    })
+    $('#insertImg').src = lastInsert
+    $('#insertLoading').classList.add('hidden')
+    $('#insertResult').classList.remove('hidden')
+    $('#insertActions').classList.remove('hidden')
+  } catch (e) {
+    $('#insertLoading').classList.add('hidden')
+    $('#insertStartActions').classList.remove('hidden')
+    toast('Insertion : ' + e.message, 'err')
+  }
+}
+$('#insertGenerate').addEventListener('click', runInsertGenerate)
+$('#insertRegen').addEventListener('click', runInsertGenerate)
+$('#insertCancel').addEventListener('click', () => {
+  $('#insertOverlay').classList.add('hidden')
+  lastInsert = null
+})
+$('#insertClose').addEventListener('click', () => {
+  $('#insertOverlay').classList.add('hidden')
+})
+// Valider le rendu final : il rejoint la galerie de rendus (publiable comme les mockups Photopea).
+$('#insertValidate').addEventListener('click', () => {
+  if (!lastInsert) return
+  state.results.push({
+    id: 'ins' + Date.now() + Math.random().toString(36).slice(2, 5),
+    path: null,
+    url: lastInsert,
+    context: 'Décor sur-mesure (IA)',
+    label: 'Décor IA',
+  })
+  renderResults()
+  refreshAction()
+  $('#insertOverlay').classList.add('hidden')
+  lastInsert = null
+  toast('Rendu ajouté à tes rendus ✓', 'ok')
 })
 
 /* ---------- 2. Type produit + collections ---------- */

@@ -148,6 +148,32 @@
     </div>
   </div>
 
+  <!-- Overlay d'insertion de l'œuvre dans le décor (étape 2) -->
+  <div id="insertOverlay" class="resize-overlay hidden">
+    <div class="resize-card">
+      <h3>Insérer l'œuvre dans le décor</h3>
+      <div class="resize-body">
+        <label class="decor-fidelity"><input type="checkbox" id="insertHighFidelity"> Haute fidélité (mieux pour le texte ; plus lent et plus cher)</label>
+        <div id="insertLoading" class="resize-loading hidden">
+          <div class="progress-ring"></div>
+          <p id="insertLoadingMsg">Insertion de votre œuvre…</p>
+        </div>
+        <div id="insertResult" class="decor-result hidden">
+          <img id="insertImg" alt="rendu final">
+        </div>
+      </div>
+      <div id="insertStartActions" class="resize-actions">
+        <button id="insertGenerate" class="primary-btn">Insérer mon œuvre</button>
+        <button id="insertCancel" class="ghost-btn">Annuler</button>
+      </div>
+      <div id="insertActions" class="resize-actions hidden">
+        <button id="insertValidate" class="primary-btn">Valider ce rendu</button>
+        <button id="insertRegen" class="ghost-btn">Régénérer l'insertion</button>
+        <button id="insertClose" class="ghost-btn">Fermer</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Overlay de progression (publication) -->
   <div id="progress" class="progress-overlay hidden">
     <div class="progress-card">
