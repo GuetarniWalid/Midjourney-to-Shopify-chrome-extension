@@ -322,11 +322,14 @@ async function runDecorGenerate() {
     const product = productOf(state.productType)
     const vibeEl = $('#decorVibe')
     const direction = vibeEl ? vibeEl.value.trim() : '' // orientation libre (raffinée côté serveur)
+    const roomEl = $('#decorRoom')
+    const roomType = roomEl && roomEl.value ? roomEl.value : null // '' = Auto -> le backend varie la pièce
     const image = await callDecorJob({
       image: state.imageDataUrl,
       target: state.orientation,
       product,
       theme: direction,
+      roomType,
     })
     // On fige les métadonnées AU MOMENT de la génération (produit/thème/orientation réels de cette
     // image) pour qu'une sauvegarde ultérieure ne dérive pas si l'utilisateur change de type produit.

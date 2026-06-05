@@ -143,7 +143,19 @@
     <div class="resize-card">
       <h3>Décor sur-mesure (IA)</h3>
       <div class="resize-body">
-        <input id="decorVibe" class="decor-vibe" type="text" maxlength="200" placeholder="Oriente le décor (optionnel) : ex. tons rose pâle, vintage bobo chic…">
+        <select id="decorRoom" class="decor-vibe">
+          <option value="">Pièce : Automatique (variée)</option>
+          <option value="living room">Salon</option>
+          <option value="bedroom">Chambre</option>
+          <option value="kitchen">Cuisine</option>
+          <option value="dining room">Salle à manger</option>
+          <option value="home office">Bureau</option>
+          <option value="entryway">Entrée</option>
+          <option value="bathroom">Salle de bain</option>
+          <option value="reading nook">Coin lecture</option>
+          <option value="studio">Atelier</option>
+        </select>
+        <input id="decorVibe" class="decor-vibe" type="text" maxlength="200" placeholder="Style libre (optionnel) : ex. chambre scandinave, tons terracotta, vinyle vintage…">
         <div id="decorLoading" class="resize-loading hidden">
           <div class="progress-ring"></div>
           <p id="decorLoadingMsg">Génération du décor…</p>
