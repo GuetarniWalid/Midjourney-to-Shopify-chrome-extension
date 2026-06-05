@@ -72,6 +72,22 @@
       <button id="decorBtn" class="ghost-btn decor-cta hidden">🎨 Générer un décor sur-mesure (IA)</button>
     </section>
 
+    <!-- 3b. Templates sauvegardés (réutilisables pour toujours) -->
+    <section class="card" id="savedCard">
+      <div class="card-head">
+        <h2 class="card-title">★ Mes templates sauvegardés</h2>
+        <span id="savedHint" class="hint">Vos favoris réutilisables</span>
+      </div>
+
+      <h3 class="saved-group-title">Templates Photopea</h3>
+      <div id="savedPhotopeaGrid" class="mockup-grid"></div>
+      <p id="savedPhotopeaEmpty" class="empty">Aucun favori Photopea. Touchez ★ sur un mockup pour le garder ici.</p>
+
+      <h3 class="saved-group-title">Templates générés par IA</h3>
+      <div id="savedAiGrid" class="mockup-grid"></div>
+      <p id="savedAiEmpty" class="empty">Aucun décor IA sauvegardé. Générez un décor puis « Sauvegarder ».</p>
+    </section>
+
     <!-- 4. Résultats -->
     <section class="card" id="resultsCard">
       <div class="card-head">
@@ -142,6 +158,7 @@
       </div>
       <div id="decorActions" class="resize-actions hidden">
         <button id="decorValidate" class="primary-btn">Valider ce décor</button>
+        <button id="decorSave" class="ghost-btn">★ Sauvegarder ce décor</button>
         <button id="decorRegen" class="ghost-btn">Régénérer</button>
         <button id="decorClose" class="ghost-btn">Fermer</button>
       </div>

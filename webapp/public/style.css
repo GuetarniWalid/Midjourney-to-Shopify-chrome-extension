@@ -114,6 +114,26 @@ body{
 .mockup-cell .spin{position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.55)}
 .mockup-empty{grid-column:1/-1;color:var(--muted);text-align:center;padding:24px 0}
 
+/* étoile favori (coin haut-droit d'un mockup) */
+.mc-fav{position:absolute;top:6px;right:6px;z-index:2;width:28px;height:28px;border-radius:50%;
+  background:rgba(0,0,0,.55);border:0;color:#fff;font-size:15px;line-height:1;cursor:pointer;
+  display:grid;place-items:center;transition:.15s;padding:0}
+.mc-fav:hover{background:rgba(0,0,0,.75)}
+.mc-fav.on{color:var(--warn)}
+.mockup-cell.busy .mc-fav{pointer-events:none}
+
+/* ---- templates sauvegardés ---- */
+.saved-group-title{margin:4px 0 12px;font-size:13px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.8px}
+.saved-group-title:not(:first-of-type){margin-top:20px}
+.saved-cell{position:relative}
+.saved-cell.incompatible{opacity:.45;filter:grayscale(.5)} /* orientation/type non compatible avec l'image courante */
+.saved-cell .mc-del{position:absolute;top:6px;right:6px;z-index:2;width:26px;height:26px;border-radius:50%;
+  background:rgba(0,0,0,.6);border:0;color:#fff;font-size:13px;cursor:pointer;display:grid;place-items:center;padding:0}
+.saved-cell .mc-del:hover{background:var(--danger)}
+.saved-cell .mc-ori{position:absolute;top:6px;left:6px;z-index:2;padding:2px 7px;border-radius:999px;
+  font-size:10px;font-weight:700;background:rgba(0,0,0,.6);color:#fff}
+
 /* ---- results / drag-drop ---- */
 .results-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:12px}
 .result-cell{position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface2);aspect-ratio:.8;touch-action:none;cursor:grab}

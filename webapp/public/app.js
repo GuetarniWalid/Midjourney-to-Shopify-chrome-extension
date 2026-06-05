@@ -12,6 +12,9 @@ const API = (CFG.apiBase || '').replace(/\/$/, '') // ex: '' (backend sert la pa
 const renderUrl = (p) => RENDER + p
 // type produit (UI en FR) -> enum backend
 const TYPE_MAP = { toile: 'painting', poster: 'poster', tapisserie: 'tapestry' }
+// type produit (UI) <-> "product" des décors IA (canvas/poster/tapestry)
+const productOf = (t) => (t === 'poster' ? 'poster' : t === 'tapisserie' ? 'tapestry' : 'canvas')
+const PRODUCT_TO_TYPE = { canvas: 'toile', poster: 'poster', tapestry: 'tapisserie' }
 
 const state = {
   imageDataUrl: null, // l'oeuvre uploadée (dataURL)
@@ -21,6 +24,8 @@ const state = {
   collection: null, // {id, title}
   templates: [], // catégories scannées
   results: [], // [{id, url, context, label}]
+  saved: { photopea: [], ai: [] }, // templates sauvegardés "pour toujours"
+  favPsds: new Set(), // chemins PSD favoris (pour l'état des étoiles)
 }
 
 /* ---------- Toast ---------- */
@@ -78,6 +83,7 @@ function loadImageFile(file) {
       if (dv) dv.value = '' // reset l'orientation décor entre deux œuvres
       state.decor = null
       renderMockups()
+      renderSavedTemplates()
       refreshAction()
     }
     img.src = reader.result
@@ -249,13 +255,14 @@ function applyResizedImage(dataUrl) {
     detectOrientation(img.naturalWidth, img.naturalHeight)
     sourcePreview.src = dataUrl
     renderMockups()
+    renderSavedTemplates()
     refreshAction()
   }
   img.src = dataUrl
 }
 
 /* ---------- Décor IA : génère un intérieur + cadre VIDE (full IA), l'œuvre s'insère à l'étape suivante ---------- */
-let lastDecor = null // dernier décor généré (data URI), en attente de validation
+let lastDecor = null // dernier décor généré : { image, product, theme, orientation } | null
 function showDecorLoading(msg) {
   $('#decorLoading').classList.remove('hidden')
   $('#decorLoadingMsg').textContent = msg
@@ -312,17 +319,19 @@ async function runDecorGenerate() {
   if (state.needsResize) return toast("Retaille d'abord l'image au bon format", 'err')
   showDecorLoading('Génération du décor sur-mesure… (~1-2 min)')
   try {
-    const product =
-      state.productType === 'poster' ? 'poster' : state.productType === 'tapisserie' ? 'tapestry' : 'canvas'
+    const product = productOf(state.productType)
     const vibeEl = $('#decorVibe')
     const direction = vibeEl ? vibeEl.value.trim() : '' // orientation libre (raffinée côté serveur)
-    lastDecor = await callDecorJob({
+    const image = await callDecorJob({
       image: state.imageDataUrl,
       target: state.orientation,
       product,
       theme: direction,
     })
-    $('#decorImg').src = lastDecor
+    // On fige les métadonnées AU MOMENT de la génération (produit/thème/orientation réels de cette
+    // image) pour qu'une sauvegarde ultérieure ne dérive pas si l'utilisateur change de type produit.
+    lastDecor = { image, product, theme: direction || null, orientation: state.orientation }
+    $('#decorImg').src = lastDecor.image
     $('#decorLoading').classList.add('hidden')
     $('#decorResult').classList.remove('hidden')
     $('#decorActions').classList.remove('hidden')
@@ -335,6 +344,7 @@ async function runDecorGenerate() {
 $('#decorBtn').addEventListener('click', openDecorOverlay)
 $('#decorGenerate').addEventListener('click', runDecorGenerate)
 $('#decorRegen').addEventListener('click', runDecorGenerate)
+$('#decorSave').addEventListener('click', saveAiDecor)
 $('#decorCancel').addEventListener('click', () => {
   $('#decorOverlay').classList.add('hidden')
   lastDecor = null
@@ -344,7 +354,7 @@ $('#decorClose').addEventListener('click', () => {
 })
 // Étape 1 -> 2 : on garde le décor validé puis on ouvre l'insertion (déclenchement explicite).
 $('#decorValidate').addEventListener('click', () => {
-  state.decor = lastDecor
+  state.decor = lastDecor.image
   $('#decorOverlay').classList.add('hidden')
   openInsertOverlay()
 })
@@ -402,8 +412,7 @@ async function runInsertGenerate() {
   if (!state.decor || !state.imageDataUrl) return toast('Valide d’abord un décor', 'err')
   showInsertLoading('Insertion de votre œuvre dans le décor… (~1-2 min)')
   try {
-    const product =
-      state.productType === 'poster' ? 'poster' : state.productType === 'tapisserie' ? 'tapestry' : 'canvas'
+    const product = productOf(state.productType)
     const fidelity = $('#insertHighFidelity') && $('#insertHighFidelity').checked ? 'high' : 'standard'
     lastInsert = await callInsertJob({
       decor: state.decor,
@@ -465,6 +474,7 @@ $$('#productType .seg-btn').forEach((btn) =>
     clearCollection()
     loadCollections()
     loadTemplates() // les mockups dépendent maintenant du type de produit
+    renderSavedTemplates() // re-filtre les templates sauvegardés sur le nouveau type
   })
 )
 
@@ -573,7 +583,12 @@ function renderMockups() {
       const L = sub.layouts[ori]
       const cell = document.createElement('div')
       cell.className = 'mockup-cell'
-      cell.innerHTML = `${L.preview ? `<img src="${renderUrl(L.preview)}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(sub.name)}</div>`
+      const isFav = state.favPsds.has(L.psd)
+      cell.innerHTML = `<button class="mc-fav${isFav ? ' on' : ''}" title="Sauvegarder ce template">${isFav ? '★' : '☆'}</button>${L.preview ? `<img src="${renderUrl(L.preview)}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(sub.name)}</div>`
+      cell.querySelector('.mc-fav').addEventListener('click', (ev) => {
+        ev.stopPropagation()
+        toggleFavorite({ type: state.productType, category: cat.name, subName: sub.name, psd: L.psd, preview: L.preview || null, orientation: ori, context: sub.context || `${cat.name} - ${sub.name}` })
+      })
       cell.addEventListener('click', () => generate(cat.name, sub, L, cell))
       grid.appendChild(cell)
       count++
@@ -592,7 +607,11 @@ function renderMockups() {
 const labelOri = (o) => ({ portrait: 'portrait', landscape: 'paysage', square: 'carré' })[o] || o
 
 /* ---------- Génération via Photopea (serveur) ---------- */
-async function generate(catName, sub, layout, cell) {
+function generate(catName, sub, layout, cell) {
+  return renderWithPsd({ psd: layout.psd, context: sub.context || `${catName} - ${sub.name}`, label: sub.name }, cell)
+}
+// Cœur du rendu Photopea, réutilisé par les mockups ET les favoris sauvegardés.
+async function renderWithPsd({ psd, context, label }, cell) {
   if (!state.imageDataUrl) return toast('Choisissez une image', 'err')
   if (state.needsResize)
     return toast("Retaille d'abord l'image au bon format (3:4, carré ou 4:3)", 'err')
@@ -605,11 +624,7 @@ async function generate(catName, sub, layout, cell) {
     const r = await fetch(RENDER + '/api/render', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        psd: layout.psd,
-        image: state.imageDataUrl,
-        mockupContext: sub.context || `${catName} - ${sub.name}`,
-      }),
+      body: JSON.stringify({ psd, image: state.imageDataUrl, mockupContext: context }),
     })
     const data = await r.json()
     if (!data.success) throw new Error(data.error || 'échec du rendu')
@@ -618,7 +633,7 @@ async function generate(catName, sub, layout, cell) {
       path: data.url,
       url: renderUrl(data.url),
       context: data.mockupContext,
-      label: sub.name,
+      label,
     })
     renderResults()
     refreshAction()
@@ -628,6 +643,150 @@ async function generate(catName, sub, layout, cell) {
   } finally {
     cell.classList.remove('busy')
     spin.remove()
+  }
+}
+
+/* ---------- 3b. Templates sauvegardés (favoris Photopea + décors IA vierges) ---------- */
+// Convertit une URL (image servie) en dataURL — utile pour réinjecter un décor sauvegardé
+// dans l'API d'insertion (qui attend une image base64).
+async function urlToDataUrl(url) {
+  const resp = await fetch(url)
+  if (!resp.ok) throw new Error('image introuvable (' + resp.status + ')')
+  const blob = await resp.blob()
+  return await new Promise((res, rej) => {
+    const fr = new FileReader()
+    fr.onloadend = () => res(fr.result)
+    fr.onerror = () => rej(new Error('lecture image échouée'))
+    fr.readAsDataURL(blob)
+  })
+}
+
+async function loadSavedTemplates() {
+  try {
+    const r = await fetch(RENDER + '/api/saved-templates')
+    const data = await r.json()
+    state.saved = { photopea: data.photopea || [], ai: data.ai || [] }
+  } catch {
+    state.saved = { photopea: [], ai: [] }
+  }
+  state.favPsds = new Set(state.saved.photopea.map((t) => t.psd))
+  renderSavedTemplates()
+  renderMockups() // rafraîchit l'état des étoiles
+}
+
+// Ajoute/retire un favori Photopea (toggle par chemin PSD).
+async function toggleFavorite(info) {
+  const existing = state.saved.photopea.find((t) => t.psd === info.psd)
+  try {
+    if (existing) {
+      const r = await fetch(RENDER + '/api/saved-templates/photopea/' + existing.id, { method: 'DELETE' })
+      if (!r.ok) throw new Error('suppression échouée')
+      toast('Favori retiré', 'ok')
+    } else {
+      const r = await fetch(RENDER + '/api/saved-templates/photopea', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: info.type, category: info.category, subName: info.subName,
+          psd: info.psd, preview: info.preview,
+          orientations: [info.orientation], context: info.context,
+        }),
+      })
+      if (!r.ok) throw new Error('sauvegarde échouée')
+      toast('Template sauvegardé ★', 'ok')
+    }
+    await loadSavedTemplates()
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'err')
+  }
+}
+
+// Sauvegarde le décor IA vierge actuellement affiché (toile blanche).
+async function saveAiDecor() {
+  if (!lastDecor) return toast('Aucun décor à sauvegarder', 'err')
+  const btn = $('#decorSave')
+  btn.disabled = true
+  try {
+    const r = await fetch(RENDER + '/api/saved-templates/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: lastDecor.image,
+        product: lastDecor.product, // métadonnées figées à la génération (pas de dérive)
+        orientation: lastDecor.orientation,
+        theme: lastDecor.theme,
+      }),
+    })
+    const data = await r.json()
+    if (!data.success) throw new Error(data.error || 'échec')
+    toast('Décor sauvegardé ★', 'ok')
+    await loadSavedTemplates()
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'err')
+  } finally {
+    btn.disabled = false
+  }
+}
+
+async function deleteSaved(kind, id) {
+  try {
+    const r = await fetch(RENDER + '/api/saved-templates/' + kind + '/' + id, { method: 'DELETE' })
+    if (!r.ok) throw new Error('suppression échouée')
+    await loadSavedTemplates()
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'err')
+  }
+}
+
+// Réutilise un décor IA sauvegardé : on le recharge comme décor validé puis on ouvre l'insertion.
+async function reuseSavedDecor(tpl) {
+  if (!state.imageDataUrl) return toast("Choisis une image d'abord", 'err')
+  if (state.needsResize) return toast("Retaille d'abord l'image au bon format", 'err')
+  if (tpl.orientation && tpl.orientation !== state.orientation)
+    return toast(`Ce décor est en ${labelOri(tpl.orientation)} — change d'orientation d'image`, 'err')
+  try {
+    state.decor = await urlToDataUrl(renderUrl(tpl.url))
+    openInsertOverlay()
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'err')
+  }
+}
+
+function renderSavedTemplates() {
+  const ppGrid = $('#savedPhotopeaGrid'), aiGrid = $('#savedAiGrid')
+  if (!ppGrid || !aiGrid) return
+  const curOri = state.orientation
+  // --- favoris Photopea (filtrés sur le type produit courant) ---
+  const pps = state.saved.photopea.filter((t) => !t.type || t.type === state.productType)
+  ppGrid.innerHTML = ''
+  $('#savedPhotopeaEmpty').classList.toggle('hidden', pps.length > 0)
+  for (const t of pps) {
+    const ori = (t.orientations && t.orientations[0]) || null
+    const compatible = !curOri || !ori || ori === curOri
+    const cell = document.createElement('div')
+    cell.className = 'mockup-cell saved-cell' + (compatible ? '' : ' incompatible')
+    cell.innerHTML = `<button class="mc-del" title="Retirer">✕</button>${ori ? `<span class="mc-ori">${escapeHtml(labelOri(ori))}</span>` : ''}${t.preview ? `<img src="${renderUrl(t.preview)}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(t.subName || 'Template')}</div>`
+    cell.querySelector('.mc-del').addEventListener('click', (ev) => { ev.stopPropagation(); deleteSaved('photopea', t.id) })
+    cell.addEventListener('click', () => {
+      if (!state.imageDataUrl) return toast('Choisis une image d\'abord', 'err')
+      if (!compatible) return toast(`Ce template est en ${labelOri(ori)} — change d'orientation d'image`, 'err')
+      renderWithPsd({ psd: t.psd, context: t.context || t.subName, label: t.subName || 'Template' }, cell)
+    })
+    ppGrid.appendChild(cell)
+  }
+  // --- décors IA (filtrés sur le type produit courant) ---
+  const ais = state.saved.ai.filter((t) => !t.product || PRODUCT_TO_TYPE[t.product] === state.productType)
+  aiGrid.innerHTML = ''
+  $('#savedAiEmpty').classList.toggle('hidden', ais.length > 0)
+  for (const t of ais) {
+    const ori = t.orientation
+    const compatible = !curOri || !ori || ori === curOri
+    const cell = document.createElement('div')
+    cell.className = 'mockup-cell saved-cell' + (compatible ? '' : ' incompatible')
+    cell.innerHTML = `<button class="mc-del" title="Supprimer">✕</button>${ori ? `<span class="mc-ori">${escapeHtml(labelOri(ori))}</span>` : ''}<img src="${renderUrl(t.url)}" loading="lazy" alt=""><div class="mc-label">${escapeHtml(t.theme || 'Décor IA')}</div>`
+    cell.querySelector('.mc-del').addEventListener('click', (ev) => { ev.stopPropagation(); deleteSaved('ai', t.id) })
+    cell.addEventListener('click', () => reuseSavedDecor(t))
+    aiGrid.appendChild(cell)
   }
 }
 
@@ -879,6 +1038,7 @@ function escapeHtml(s) {
 
 ;(async function init() {
   await loadTemplates()
+  loadSavedTemplates()
   loadCollections()
   refreshAction()
 })()

@@ -1,5 +1,7 @@
 node_modules/
 uploads/*
 !uploads/.gitkeep
+saved-templates/*
+!saved-templates/.gitkeep
 .env
 *.log

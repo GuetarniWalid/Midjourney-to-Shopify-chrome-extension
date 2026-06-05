@@ -15,6 +15,10 @@ const PORT = process.env.PORT || 4000;
 const MOCKUPS_PATH = process.env.MOCKUPS_PATH || String.raw`C:\Users\gueta\Documents\MyselfMonArt - Mockups (templates PSD)`;
 const UPLOADS = path.join(__dirname, 'uploads');
 fs.mkdirSync(UPLOADS, { recursive: true });
+// Templates sauvegardés "pour toujours" : favoris Photopea (références PSD) + décors IA vierges (fichiers image).
+const SAVED_DIR = path.join(__dirname, 'saved-templates');
+const SAVED_DB = path.join(SAVED_DIR, 'templates.json');
+fs.mkdirSync(SAVED_DIR, { recursive: true });
 
 const app = express();
 app.use(cors()); // ouvert : l'UI (servie par le backend ou en local) doit pouvoir appeler ce moteur
@@ -23,6 +27,8 @@ app.use(express.static(path.join(__dirname, 'public'))); // sert l'UI aussi en l
 app.use('/uploads', express.static(UPLOADS));
 // servir les aperçus directement depuis le dossier mockups
 app.use('/mockups', express.static(MOCKUPS_PATH));
+// servir les décors IA sauvegardés (fichiers image persistés)
+app.use('/saved', express.static(SAVED_DIR));
 
 // ---- Scan tolérant des mockups (jpg/png, casse, typos d'orientation) ----
 const ORI = {
@@ -166,12 +172,131 @@ app.delete('/api/upload/:name', async (req, res) => {
   } catch (e) { res.status(404).json({ success: false, error: e.message }); }
 });
 
+// ---- Templates sauvegardés (favoris Photopea + décors IA vierges) ----
+// Stockés dans saved-templates/templates.json : { photopea:[...], ai:[...] }.
+// Les décors IA sont aussi écrits comme fichiers image dans saved-templates/ et servis via /saved.
+let savedWriteChain = Promise.resolve(); // sérialise les écritures (read-modify-write atomique)
+
+async function readSaved() {
+  // IMPORTANT : ne renvoyer une DB vide QUE si le fichier n'existe pas encore (1er run).
+  // Toute autre erreur (lecture EBUSY/EACCES, JSON corrompu) est propagée -> mutateSaved
+  // abandonne l'écriture et NE remplace PAS le fichier (sinon on perdrait tous les favoris).
+  let raw;
+  try {
+    raw = await fsp.readFile(SAVED_DB, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return { photopea: [], ai: [] };
+    throw e;
+  }
+  let db;
+  try {
+    db = JSON.parse(raw);
+  } catch (e) {
+    throw new Error('templates.json illisible (corrompu) — écriture annulée pour préserver les données : ' + e.message);
+  }
+  return { photopea: Array.isArray(db.photopea) ? db.photopea : [], ai: Array.isArray(db.ai) ? db.ai : [] };
+}
+// Applique une mutation (fn reçoit la db, la modifie, retourne une valeur) de façon sérialisée.
+function mutateSaved(fn) {
+  const run = async () => {
+    const db = await readSaved();
+    const result = await fn(db);
+    await fsp.writeFile(SAVED_DB, JSON.stringify(db, null, 2));
+    return result;
+  };
+  savedWriteChain = savedWriteChain.then(run, run); // continue même après une erreur précédente
+  return savedWriteChain;
+}
+const newId = (p) => p + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+
+// Liste tous les templates sauvegardés. Les décors IA reçoivent une `url` servable (/saved/<file>).
+app.get('/api/saved-templates', async (req, res) => {
+  try {
+    const db = await readSaved();
+    const ai = db.ai.map((t) => ({ ...t, url: '/saved/' + encodeURIComponent(t.file) }));
+    res.json({ success: true, photopea: db.photopea, ai });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Sauvegarde un favori Photopea (référence vers un PSD existant). Dédupe par chemin PSD.
+app.post('/api/saved-templates/photopea', async (req, res) => {
+  try {
+    const { type, category, subName, psd, preview, orientations, context } = req.body || {};
+    if (!psd || !subName) return res.status(400).json({ success: false, error: 'psd et subName requis' });
+    const rec = await mutateSaved((db) => {
+      const existing = db.photopea.find((t) => t.psd === psd);
+      if (existing) return existing; // déjà en favori -> idempotent
+      const r = {
+        id: newId('pp_'), type: type || null, category: category || null, subName,
+        psd, preview: preview || null,
+        orientations: Array.isArray(orientations) ? orientations : [],
+        context: context || null, savedAt: new Date().toISOString(),
+      };
+      db.photopea.push(r);
+      return r;
+    });
+    res.json({ success: true, template: rec });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Sauvegarde un décor IA vierge : écrit l'image sur disque puis enregistre sa fiche.
+app.post('/api/saved-templates/ai', async (req, res) => {
+  try {
+    const { image, product, orientation, theme } = req.body || {};
+    if (!image || !image.startsWith('data:')) return res.status(400).json({ success: false, error: 'image (dataURL) requise' });
+    const m = image.match(/^data:([^;]+);base64,(.*)$/);
+    if (!m) return res.status(400).json({ success: false, error: 'dataURL invalide' });
+    // Allowlist stricte : on n'écrit/sert QUE des images connues (pas de .html/.svg servi tel quel).
+    const MIME_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/webp': 'webp' };
+    const ext = MIME_EXT[m[1].toLowerCase()];
+    if (!ext) return res.status(400).json({ success: false, error: 'type image non supporté (png/jpeg/webp uniquement)' });
+    const file = `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    await fsp.writeFile(path.join(SAVED_DIR, file), Buffer.from(m[2], 'base64'));
+    let rec;
+    try {
+      rec = await mutateSaved((db) => {
+        const r = {
+          id: newId('ai_'), file, product: product || 'canvas',
+          orientation: orientation || null, theme: theme || null,
+          savedAt: new Date().toISOString(),
+        };
+        db.ai.push(r);
+        return r;
+      });
+    } catch (e) {
+      await fsp.unlink(path.join(SAVED_DIR, file)).catch(() => {}); // pas d'image orpheline si la fiche échoue
+      throw e;
+    }
+    res.json({ success: true, template: { ...rec, url: '/saved/' + encodeURIComponent(rec.file) } });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Supprime un template sauvegardé (et le fichier image pour les décors IA).
+app.delete('/api/saved-templates/:kind/:id', async (req, res) => {
+  try {
+    const { kind, id } = req.params;
+    if (kind !== 'photopea' && kind !== 'ai') return res.status(400).json({ success: false, error: 'kind invalide' });
+    const removed = await mutateSaved((db) => {
+      const arr = db[kind];
+      const i = arr.findIndex((t) => t.id === id);
+      if (i < 0) return null;
+      return arr.splice(i, 1)[0];
+    });
+    if (!removed) return res.status(404).json({ success: false, error: 'introuvable' });
+    if (kind === 'ai' && removed.file) {
+      await fsp.unlink(path.join(SAVED_DIR, path.basename(removed.file))).catch(() => {});
+    }
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // (collections + publish ne passent PAS par ce moteur : l'UI les appelle directement sur le backend,
 //  même origine que la page. Ce serveur ne fait que le rendu local des mockups.)
 
 // ---- Boot ----
 (async () => {
   app.listen(PORT, () => console.log(`\n  Moteur de rendu MyselfMonArt → http://localhost:${PORT}\n  Mockups: ${MOCKUPS_PATH}\n`));
+  if (process.env.SKIP_ENGINE) { console.log('[photopea] démarrage ignoré (SKIP_ENGINE).'); return; }
   try { await engine.start(); }
   catch (e) { console.error('[photopea] démarrage échoué:', e.message, '\n  Les rendus échoueront tant que le moteur n\'est pas prêt.'); }
 })();
