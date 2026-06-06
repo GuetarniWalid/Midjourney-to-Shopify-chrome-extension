@@ -126,10 +126,13 @@ app.get('/api/templates', async (req, res) => {
 });
 
 // Résout le chemin disque absolu d'un PSD à partir d'une URL /mockups/...
+// Anti path-traversal STRICT : on normalise (path.resolve gère les '..') et on exige une frontière
+// de répertoire (root + séparateur), sinon un dossier FRÈRE partageant le préfixe passerait à tort.
 function psdDiskPath(psdUrl) {
   const rel = decodeURIComponent(psdUrl.replace(/^\/mockups\//, ''));
-  const abs = path.join(MOCKUPS_PATH, rel);
-  if (!abs.startsWith(MOCKUPS_PATH)) throw new Error('chemin invalide'); // anti path-traversal
+  const root = path.resolve(MOCKUPS_PATH);
+  const abs = path.resolve(root, rel);
+  if (abs !== root && !abs.startsWith(root + path.sep)) throw new Error('chemin invalide');
   return abs;
 }
 
@@ -242,7 +245,7 @@ app.post('/api/saved-templates/photopea', async (req, res) => {
 // Sauvegarde un décor IA vierge : écrit l'image sur disque puis enregistre sa fiche.
 app.post('/api/saved-templates/ai', async (req, res) => {
   try {
-    const { image, product, orientation, theme } = req.body || {};
+    const { image, product, orientation, theme, roomType } = req.body || {};
     if (!image || !image.startsWith('data:')) return res.status(400).json({ success: false, error: 'image (dataURL) requise' });
     const m = image.match(/^data:([^;]+);base64,(.*)$/);
     if (!m) return res.status(400).json({ success: false, error: 'dataURL invalide' });
@@ -258,6 +261,7 @@ app.post('/api/saved-templates/ai', async (req, res) => {
         const r = {
           id: newId('ai_'), file, product: product || 'canvas',
           orientation: orientation || null, theme: theme || null,
+          roomType: roomType || null, // pièce choisie au dropdown -> regroupement par pièce dans l'UI
           savedAt: new Date().toISOString(),
         };
         db.ai.push(r);
@@ -288,6 +292,52 @@ app.delete('/api/saved-templates/:kind/:id', async (req, res) => {
     }
     res.json({ success: true });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Supprime un mockup du disque (PC, dans MOCKUPS_PATH). Comportement (choix produit) :
+//  - on retire les fichiers de l'ORIENTATION visée (le PSD + son aperçu) ;
+//  - s'il ne reste PLUS AUCUN PSD dans le dossier sous-catégorie, on supprime le dossier entier
+//    (aperçus orphelins, context.txt, etc.). Action définitive sur des fichiers source.
+app.delete('/api/mockup', async (req, res) => {
+  try {
+    const { psd, preview } = req.body || {};
+    if (!psd) return res.status(400).json({ success: false, error: 'psd requis' });
+    const psdAbs = psdDiskPath(psd); // valide l'anti-traversal + le préfixe MOCKUPS_PATH
+    const dir = path.dirname(psdAbs); // dossier SOUS-CATÉGORIE du mockup
+    const rel = path.relative(MOCKUPS_PATH, dir);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel))
+      return res.status(400).json({ success: false, error: 'chemin invalide' });
+    const depth = rel.split(path.sep).filter(Boolean).length;
+    // garde-fou : on n'autorise le rm d'un DOSSIER que s'il s'agit bien d'un dossier sous-catégorie,
+    // JAMAIS d'une catégorie ni d'une racine type. Profondeur attendue : type/cat/sous-cat (3) si
+    // structure par type, sinon cat/sous-cat (2). (depth>=2 effacerait toute une catégorie en mode type !)
+    const { hasTypeDirs } = await scanMockups();
+    const minDepth = hasTypeDirs ? 3 : 2;
+    await fsp.unlink(psdAbs).catch(() => {}); // PSD de l'orientation visée (déjà absent = ok)
+    if (preview && preview.startsWith('/mockups/')) {
+      try { await fsp.unlink(psdDiskPath(preview)); } catch {} // aperçu de cette orientation
+    }
+    let folderRemoved = false;
+    const remaining = await fsp.readdir(dir).catch(() => []);
+    const hasPsd = remaining.some((f) => ['.psd', '.psb'].includes(path.extname(f).toLowerCase()));
+    if (!hasPsd && depth >= minDepth) {
+      await fsp.rm(dir, { recursive: true, force: true }); // plus aucun PSD -> on enlève la sous-catégorie
+      folderRemoved = true;
+      // hygiène : si le dossier CATÉGORIE parent devient vide, on l'enlève aussi (jamais une racine type).
+      const parent = path.dirname(dir);
+      const relParent = path.relative(MOCKUPS_PATH, parent);
+      const parentDepth = (!relParent || relParent.startsWith('..') || path.isAbsolute(relParent))
+        ? 0 : relParent.split(path.sep).filter(Boolean).length;
+      if (parentDepth >= 1) {
+        const leftover = await fsp.readdir(parent).catch(() => ['x']); // erreur de lecture -> ne rien supprimer
+        if (leftover.length === 0) await fsp.rm(parent, { recursive: true, force: true });
+      }
+    }
+    res.json({ success: true, folderRemoved });
+  } catch (e) {
+    console.error('[mockup delete]', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 // (collections + publish ne passent PAS par ce moteur : l'UI les appelle directement sur le backend,

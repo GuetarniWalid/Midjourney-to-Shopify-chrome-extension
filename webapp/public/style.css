@@ -106,9 +106,12 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 /* ---- mockup grid ---- */
 .mockup-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px}
 @media(min-width:560px){.mockup-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
-.mockup-grid.disabled{opacity:.5;pointer-events:none;filter:grayscale(.4)} /* format non conforme : clics bloqués */
+/* format non conforme : grisé. On NE bloque PAS les pointer-events -> l'appui long (gérer/supprimer
+   un mockup) reste accessible ; le clic de RENDU, lui, est bloqué par le garde dans renderWithPsd. */
+.mockup-grid.disabled{opacity:.5;filter:grayscale(.4)}
 .mockup-cat{grid-column:1/-1;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:6px 0 -4px;font-weight:700}
-.mockup-cell{position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface2);cursor:pointer;aspect-ratio:1;transition:.15s}
+.mockup-cell{position:relative;border-radius:12px;overflow:hidden;border:1px solid var(--line);background:var(--surface2);cursor:pointer;aspect-ratio:1;transition:.15s;
+  user-select:none;-webkit-user-select:none;-webkit-touch-callout:none} /* appui long = menu, pas de sélection/callout natif */
 .mockup-cell:active{transform:scale(.97)}
 .mockup-cell img{width:100%;height:100%;object-fit:cover;display:block}
 .mockup-cell .mc-label{position:absolute;left:0;right:0;bottom:0;padding:6px 8px;font-size:11px;background:linear-gradient(transparent,rgba(0,0,0,.8));color:#fff}
@@ -116,13 +119,25 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .mockup-cell .spin{position:absolute;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.55)}
 .mockup-empty{grid-column:1/-1;color:var(--muted);text-align:center;padding:24px 0}
 
-/* étoile favori (coin haut-droit d'un mockup) */
-.mc-fav{position:absolute;top:6px;right:6px;z-index:2;width:28px;height:28px;border-radius:50%;
-  background:rgba(0,0,0,.55);border:0;color:#fff;font-size:15px;line-height:1;cursor:pointer;
-  display:grid;place-items:center;transition:.15s;padding:0}
-.mc-fav:hover{background:rgba(0,0,0,.75)}
-.mc-fav.on{color:var(--warn)}
-.mockup-cell.busy .mc-fav{pointer-events:none}
+/* ★ de STATUT (non cliquable) : marque un mockup déjà en favori. Le favori s'ajoute/retire
+   via l'appui long (menu contextuel) — plus de bouton étoile visible « au départ ». */
+.mc-faved{position:absolute;top:6px;right:6px;z-index:2;font-size:14px;line-height:1;color:var(--warn);
+  text-shadow:0 1px 3px rgba(0,0,0,.8);pointer-events:none}
+
+/* signe distinctif léger de l'ORIGINE d'un template sauvegardé (haut-droit, à la place du favori) */
+.mc-kind{position:absolute;top:6px;right:6px;z-index:2;padding:2px 6px;border-radius:999px;
+  font-size:9.5px;font-weight:800;letter-spacing:.4px;line-height:1.4;pointer-events:none;color:#fff}
+.mc-kind.ai{background:rgba(138,108,255,.85)}  /* IA -> accent2 (violet) */
+.mc-kind.pp{background:rgba(108,140,255,.85)}  /* Photopea -> accent (bleu) */
+
+/* menu contextuel (appui long / clic droit) */
+.ctx-menu{position:fixed;z-index:90;min-width:200px;background:var(--surface2);border:1px solid var(--line);
+  border-radius:12px;box-shadow:var(--shadow);padding:6px;display:flex;flex-direction:column;gap:2px;animation:pop .12s ease}
+.ctx-item{display:block;width:100%;text-align:left;padding:12px;border:0;border-radius:8px;background:transparent;
+  color:var(--text);font:inherit;font-weight:600;font-size:14px;cursor:pointer}
+.ctx-item:hover,.ctx-item:active{background:rgba(108,140,255,.18)}
+.ctx-item.danger{color:var(--danger)}
+.ctx-item.danger:hover,.ctx-item.danger:active{background:rgba(255,93,108,.16)}
 
 /* ---- templates sauvegardés ---- */
 .saved-group-title{margin:4px 0 12px;font-size:13px;font-weight:700;color:var(--muted);
@@ -130,9 +145,6 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .saved-group-title:not(:first-of-type){margin-top:20px}
 .saved-cell{position:relative}
 .saved-cell.incompatible{opacity:.45;filter:grayscale(.5)} /* orientation/type non compatible avec l'image courante */
-.saved-cell .mc-del{position:absolute;top:6px;right:6px;z-index:2;width:26px;height:26px;border-radius:50%;
-  background:rgba(0,0,0,.6);border:0;color:#fff;font-size:13px;cursor:pointer;display:grid;place-items:center;padding:0}
-.saved-cell .mc-del:hover{background:var(--danger)}
 .saved-cell .mc-ori{position:absolute;top:6px;left:6px;z-index:2;padding:2px 7px;border-radius:999px;
   font-size:10px;font-weight:700;background:rgba(0,0,0,.6);color:#fff}
 

@@ -72,20 +72,14 @@
       <button id="decorBtn" class="ghost-btn decor-cta hidden">🎨 Générer un décor sur-mesure (IA)</button>
     </section>
 
-    <!-- 3b. Templates sauvegardés (réutilisables pour toujours) -->
+    <!-- 3b. Templates sauvegardés (réutilisables pour toujours) — regroupés UNIQUEMENT par pièce -->
     <section class="card" id="savedCard">
       <div class="card-head">
         <h2 class="card-title">★ Mes templates sauvegardés</h2>
-        <span id="savedHint" class="hint">Vos favoris réutilisables</span>
+        <span id="savedHint" class="hint">Appui long → options</span>
       </div>
-
-      <h3 class="saved-group-title">Templates Photopea</h3>
-      <div id="savedPhotopeaGrid" class="mockup-grid"></div>
-      <p id="savedPhotopeaEmpty" class="empty">Aucun favori Photopea. Touchez ★ sur un mockup pour le garder ici.</p>
-
-      <h3 class="saved-group-title">Templates générés par IA</h3>
-      <div id="savedAiGrid" class="mockup-grid"></div>
-      <p id="savedAiEmpty" class="empty">Aucun décor IA sauvegardé. Générez un décor puis « Sauvegarder ».</p>
+      <div id="savedGroups"></div>
+      <p id="savedEmpty" class="empty">Aucun template sauvegardé. Appui long sur un mockup pour l'ajouter aux favoris, ou générez puis « Sauvegarder » un décor IA.</p>
     </section>
 
     <!-- 4. Résultats -->
@@ -108,6 +102,9 @@
 
   <!-- Overlay agrandissement -->
   <div id="lightbox" class="lightbox hidden"><img id="lightboxImg" alt=""><button class="lb-close">✕</button></div>
+
+  <!-- Menu contextuel (appui long / clic droit) -->
+  <div id="ctxMenu" class="ctx-menu hidden"></div>
 
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>

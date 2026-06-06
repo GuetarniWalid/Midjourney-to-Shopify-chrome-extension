@@ -15,6 +15,14 @@ const TYPE_MAP = { toile: 'painting', poster: 'poster', tapisserie: 'tapestry' }
 // type produit (UI) <-> "product" des décors IA (canvas/poster/tapestry)
 const productOf = (t) => (t === 'poster' ? 'poster' : t === 'tapisserie' ? 'tapestry' : 'canvas')
 const PRODUCT_TO_TYPE = { canvas: 'toile', poster: 'poster', tapestry: 'tapisserie' }
+// Pièce : valeur du <select #decorRoom> -> libellé FR. Sert à ranger les décors IA sauvegardés
+// dans le bon groupe « pièce » de l'écran « Mes templates sauvegardés ». '' / inconnue -> « Autre ».
+const ROOM_LABELS = {
+  'living room': 'Salon', bedroom: 'Chambre', kitchen: 'Cuisine',
+  'dining room': 'Salle à manger', 'home office': 'Bureau', entryway: 'Entrée',
+  bathroom: 'Salle de bain', 'reading nook': 'Coin lecture', studio: 'Atelier',
+}
+const roomLabelOf = (rt) => ROOM_LABELS[rt] || 'Autre'
 
 const state = {
   imageDataUrl: null, // l'oeuvre uploadée (dataURL)
@@ -335,7 +343,7 @@ async function runDecorGenerate() {
     })
     // On fige les métadonnées AU MOMENT de la génération (produit/thème/orientation réels de cette
     // image) pour qu'une sauvegarde ultérieure ne dérive pas si l'utilisateur change de type produit.
-    lastDecor = { image, product, theme: direction || null, orientation: state.orientation }
+    lastDecor = { image, product, theme: direction || null, orientation: state.orientation, roomType }
     $('#decorImg').src = lastDecor.image
     $('#decorLoading').classList.add('hidden')
     $('#decorResult').classList.remove('hidden')
@@ -589,12 +597,21 @@ function renderMockups() {
       const cell = document.createElement('div')
       cell.className = 'mockup-cell'
       const isFav = state.favPsds.has(L.psd)
-      cell.innerHTML = `<button class="mc-fav${isFav ? ' on' : ''}" title="Sauvegarder ce template">${isFav ? '★' : '☆'}</button>${L.preview ? `<img src="${renderUrl(L.preview)}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(sub.name)}</div>`
-      cell.querySelector('.mc-fav').addEventListener('click', (ev) => {
-        ev.stopPropagation()
-        toggleFavorite({ type: state.productType, category: cat.name, subName: sub.name, psd: L.psd, preview: L.preview || null, orientation: ori, context: sub.context || `${cat.name} - ${sub.name}` })
+      // plus d'étoile cliquable « au départ » : seul un petit ★ de STATUT si déjà en favori.
+      // Favori + suppression passent par l'appui long (menu contextuel).
+      cell.innerHTML = `${isFav ? '<span class="mc-faved" title="Déjà dans vos favoris">★</span>' : ''}${L.preview ? `<img src="${renderUrl(L.preview)}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(sub.name)}</div>`
+      cell.addEventListener('click', () => {
+        if (cell._suppressClick) { cell._suppressClick = false; return } // clic « fantôme » après long-press
+        generate(cat.name, sub, L, cell)
       })
-      cell.addEventListener('click', () => generate(cat.name, sub, L, cell))
+      attachLongPress(cell, () => {
+        const fav = state.favPsds.has(L.psd)
+        const favInfo = { type: state.productType, category: cat.name, subName: sub.name, psd: L.psd, preview: L.preview || null, orientation: ori, context: sub.context || `${cat.name} - ${sub.name}` }
+        return [
+          { label: fav ? '★ Retirer des favoris' : '★ Ajouter aux favoris', onClick: () => toggleFavorite(favInfo) },
+          { label: '🗑 Supprimer du disque', danger: true, onClick: () => deleteMockup({ psd: L.psd, preview: L.preview || null, name: sub.name }) },
+        ]
+      })
       grid.appendChild(cell)
       count++
     }
@@ -720,6 +737,7 @@ async function saveAiDecor() {
         product: lastDecor.product, // métadonnées figées à la génération (pas de dérive)
         orientation: lastDecor.orientation,
         theme: lastDecor.theme,
+        roomType: lastDecor.roomType || null, // pièce choisie -> regroupement par pièce
       }),
     })
     const data = await r.json()
@@ -743,6 +761,33 @@ async function deleteSaved(kind, id) {
   }
 }
 
+// Supprime un mockup du DISQUE (fichiers source sur le PC). Confirmation car c'est définitif.
+// Le serveur retire l'orientation visée et, si c'était le dernier PSD, le dossier entier.
+async function deleteMockup({ psd, preview, name }) {
+  if (!confirm(`Supprimer définitivement le mockup « ${name} » du disque ?\nCette action est irréversible.`)) return
+  try {
+    const r = await fetch(RENDER + '/api/mockup', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ psd, preview }),
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok || !data.success) throw new Error(data.error || 'suppression échouée')
+    // nettoie les favoris Photopea devenus orphelins (PSD effacé) pour éviter des cellules mortes
+    const folderPrefix = psd.slice(0, psd.lastIndexOf('/') + 1)
+    const orphans = state.saved.photopea.filter(
+      (t) => t.psd === psd || (data.folderRemoved && t.psd && t.psd.startsWith(folderPrefix))
+    )
+    for (const o of orphans)
+      await fetch(RENDER + '/api/saved-templates/photopea/' + o.id, { method: 'DELETE' }).catch(() => {})
+    toast(data.folderRemoved ? 'Mockup supprimé du disque ✓' : 'Orientation supprimée du disque ✓', 'ok')
+    await loadTemplates()
+    await loadSavedTemplates()
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'err')
+  }
+}
+
 // Réutilise un décor IA sauvegardé : on le recharge comme décor validé puis on ouvre l'insertion.
 async function reuseSavedDecor(tpl) {
   if (!state.imageDataUrl) return toast("Choisis une image d'abord", 'err')
@@ -757,42 +802,66 @@ async function reuseSavedDecor(tpl) {
   }
 }
 
+// Écran « Mes templates sauvegardés » : plus de séparation Photopea/IA — on regroupe
+// UNIQUEMENT par pièce. Les Photopea sont rangés par leur dossier-catégorie, les décors IA
+// par la pièce choisie au dropdown (mémorisée). Un petit signe haut-droit distingue PS / IA.
 function renderSavedTemplates() {
-  const ppGrid = $('#savedPhotopeaGrid'), aiGrid = $('#savedAiGrid')
-  if (!ppGrid || !aiGrid) return
+  const wrap = $('#savedGroups')
+  if (!wrap) return
   const curOri = state.orientation
-  // --- favoris Photopea (filtrés sur le type produit courant) ---
-  const pps = state.saved.photopea.filter((t) => !t.type || t.type === state.productType)
-  ppGrid.innerHTML = ''
-  $('#savedPhotopeaEmpty').classList.toggle('hidden', pps.length > 0)
-  for (const t of pps) {
-    const ori = (t.orientations && t.orientations[0]) || null
-    const compatible = !curOri || !ori || ori === curOri
-    const cell = document.createElement('div')
-    cell.className = 'mockup-cell saved-cell' + (compatible ? '' : ' incompatible')
-    cell.innerHTML = `<button class="mc-del" title="Retirer">✕</button>${ori ? `<span class="mc-ori">${escapeHtml(labelOri(ori))}</span>` : ''}${t.preview ? `<img src="${renderUrl(t.preview)}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(t.subName || 'Template')}</div>`
-    cell.querySelector('.mc-del').addEventListener('click', (ev) => { ev.stopPropagation(); deleteSaved('photopea', t.id) })
-    cell.addEventListener('click', () => {
-      if (!state.imageDataUrl) return toast('Choisis une image d\'abord', 'err')
-      if (!compatible) return toast(`Ce template est en ${labelOri(ori)} — change d'orientation d'image`, 'err')
-      renderWithPsd({ psd: t.psd, context: t.context || t.subName, label: t.subName || 'Template' }, cell)
-    })
-    ppGrid.appendChild(cell)
+  wrap.innerHTML = ''
+  // Unifie favoris Photopea + décors IA, filtrés sur le type produit courant.
+  const entries = []
+  for (const t of state.saved.photopea.filter((t) => !t.type || t.type === state.productType)) {
+    entries.push({ kind: 'photopea', room: t.category || 'Autre', ori: (t.orientations && t.orientations[0]) || null, data: t })
   }
-  // --- décors IA (filtrés sur le type produit courant) ---
-  const ais = state.saved.ai.filter((t) => !t.product || PRODUCT_TO_TYPE[t.product] === state.productType)
-  aiGrid.innerHTML = ''
-  $('#savedAiEmpty').classList.toggle('hidden', ais.length > 0)
-  for (const t of ais) {
-    const ori = t.orientation
-    const compatible = !curOri || !ori || ori === curOri
-    const cell = document.createElement('div')
-    cell.className = 'mockup-cell saved-cell' + (compatible ? '' : ' incompatible')
-    cell.innerHTML = `<button class="mc-del" title="Supprimer">✕</button>${ori ? `<span class="mc-ori">${escapeHtml(labelOri(ori))}</span>` : ''}<img src="${renderUrl(t.url)}" loading="lazy" alt=""><div class="mc-label">${escapeHtml(t.theme || 'Décor IA')}</div>`
-    cell.querySelector('.mc-del').addEventListener('click', (ev) => { ev.stopPropagation(); deleteSaved('ai', t.id) })
-    cell.addEventListener('click', () => reuseSavedDecor(t))
-    aiGrid.appendChild(cell)
+  for (const t of state.saved.ai.filter((t) => !t.product || PRODUCT_TO_TYPE[t.product] === state.productType)) {
+    entries.push({ kind: 'ai', room: roomLabelOf(t.roomType), ori: t.orientation || null, data: t })
   }
+  $('#savedEmpty').classList.toggle('hidden', entries.length > 0)
+  // Regroupe par pièce ; « Autre » en dernier, le reste par ordre alphabétique FR.
+  const groups = {}
+  for (const e of entries) (groups[e.room] = groups[e.room] || []).push(e)
+  const rooms = Object.keys(groups).sort((a, b) => (a === 'Autre') - (b === 'Autre') || a.localeCompare(b, 'fr'))
+  for (const room of rooms) {
+    const title = document.createElement('h3')
+    title.className = 'saved-group-title'
+    title.textContent = room
+    wrap.appendChild(title)
+    const grid = document.createElement('div')
+    grid.className = 'mockup-grid'
+    for (const e of groups[room]) grid.appendChild(buildSavedCell(e, curOri))
+    wrap.appendChild(grid)
+  }
+}
+
+// Construit une cellule de template sauvegardé (favori Photopea OU décor IA).
+// Clic = réutiliser ; appui long = menu (Supprimer / Retirer des favoris).
+function buildSavedCell(e, curOri) {
+  const t = e.data
+  const ori = e.ori
+  const compatible = !curOri || !ori || ori === curOri
+  const cell = document.createElement('div')
+  cell.className = 'mockup-cell saved-cell' + (compatible ? '' : ' incompatible')
+  const kindSign = e.kind === 'ai'
+    ? '<span class="mc-kind ai" title="Décor généré par IA">IA</span>'
+    : '<span class="mc-kind pp" title="Mockup Photopea">PS</span>'
+  const imgUrl = e.kind === 'ai' ? renderUrl(t.url) : t.preview ? renderUrl(t.preview) : null
+  const label = e.kind === 'ai' ? t.theme || 'Décor IA' : t.subName || 'Template'
+  cell.innerHTML = `${kindSign}${ori ? `<span class="mc-ori">${escapeHtml(labelOri(ori))}</span>` : ''}${imgUrl ? `<img src="${imgUrl}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(label)}</div>`
+  cell.addEventListener('click', () => {
+    if (cell._suppressClick) { cell._suppressClick = false; return } // clic « fantôme » après long-press
+    if (e.kind === 'ai') return reuseSavedDecor(t)
+    if (!state.imageDataUrl) return toast('Choisis une image d\'abord', 'err')
+    if (!compatible) return toast(`Ce template est en ${labelOri(ori)} — change d'orientation d'image`, 'err')
+    renderWithPsd({ psd: t.psd, context: t.context || t.subName, label: t.subName || 'Template' }, cell)
+  })
+  attachLongPress(cell, () =>
+    e.kind === 'ai'
+      ? [{ label: '🗑 Supprimer', danger: true, onClick: () => deleteSaved('ai', t.id) }]
+      : [{ label: '🗑 Retirer des favoris', danger: true, onClick: () => deleteSaved('photopea', t.id) }]
+  )
+  return cell
 }
 
 /* ---------- 4. Résultats + drag-drop UNIFIÉ (pointer events : souris === tactile) ---------- */
@@ -894,6 +963,87 @@ function closeLightbox() {
 lightbox.addEventListener('click', () => {
   if (Date.now() - lightboxOpenedAt > 350) closeLightbox()
 })
+
+/* ---------- Menu contextuel (appui long mobile + clic droit desktop) ---------- */
+// Un seul menu flottant réutilisé pour mockups ET templates sauvegardés. Les actions
+// risquées (favori, suppression) ne sont plus des boutons « toujours visibles » : on les
+// atteint par un geste volontaire (appui long ~500ms) -> plus de clic par inadvertance.
+const ctxMenu = $('#ctxMenu')
+let ctxOpen = false, ctxArmed = false
+// On ferme le menu dès qu'une NOUVELLE interaction démarre hors du menu — en écoutant le
+// pointerdown, PAS le click. Le "ghost click" tactile qui suit l'appui long n'est pas un
+// pointerdown : il ne peut donc pas refermer le menu juste après son ouverture (le pointerdown
+// d'ouverture, lui, est déjà passé avant que le menu n'apparaisse). Robuste, sans garde temporel.
+// On en profite pour ARMER le menu : ses items ne deviennent cliquables qu'après ce 1er pointerdown
+// post-ouverture. Ainsi, si le menu s'ouvre SOUS le doigt, le clic fantôme du relâchement (non précédé
+// d'un nouveau pointerdown) ne sélectionne PAS le 1er item par inadvertance.
+function onCtxOutsidePointer(e) {
+  ctxArmed = true
+  if (e.target.closest('#ctxMenu')) return
+  closeContextMenu()
+}
+function closeContextMenu() {
+  document.removeEventListener('pointerdown', onCtxOutsidePointer, true)
+  document.removeEventListener('scroll', closeContextMenu, true)
+  window.removeEventListener('resize', closeContextMenu)
+  if (!ctxOpen) return
+  ctxMenu.classList.add('hidden')
+  ctxMenu.innerHTML = ''
+  ctxOpen = false
+}
+function openContextMenu(x, y, items) {
+  if (!ctxMenu || !items || !items.length) return
+  closeContextMenu() // repart propre (retire d'éventuels listeners d'un menu précédent)
+  ctxMenu.innerHTML = ''
+  for (const it of items) {
+    const b = document.createElement('button')
+    b.className = 'ctx-item' + (it.danger ? ' danger' : '')
+    b.textContent = it.label
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); if (!ctxArmed) return; closeContextMenu(); it.onClick() })
+    ctxMenu.appendChild(b)
+  }
+  ctxMenu.classList.remove('hidden')
+  ctxOpen = true
+  ctxArmed = false // armé seulement au 1er pointerdown post-ouverture (cf. onCtxOutsidePointer)
+  // positionnement clampé au viewport (mesuré après affichage)
+  const mw = ctxMenu.offsetWidth, mh = ctxMenu.offsetHeight
+  ctxMenu.style.left = Math.max(8, Math.min(x, window.innerWidth - mw - 8)) + 'px'
+  ctxMenu.style.top = Math.max(8, Math.min(y, window.innerHeight - mh - 8)) + 'px'
+  // listeners de fermeture armés SEULEMENT une fois le menu ouvert (l'ouverture ne génère ni
+  // scroll ni resize : pas d'auto-fermeture). Ils sont retirés dans closeContextMenu().
+  document.addEventListener('pointerdown', onCtxOutsidePointer, true)
+  document.addEventListener('scroll', closeContextMenu, true)
+  window.addEventListener('resize', closeContextMenu)
+}
+
+// Attache la détection d'appui long (tactile/souris) + clic droit à une cellule.
+// getItems() est appelé À L'OUVERTURE (état frais : favori ou non, etc.).
+function attachLongPress(cell, getItems) {
+  let timer = null, sx = 0, sy = 0
+  const cancel = () => { if (timer) { clearTimeout(timer); timer = null } }
+  cell.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return // clic droit -> géré par 'contextmenu'
+    cell._suppressClick = false
+    sx = e.clientX; sy = e.clientY
+    cancel()
+    timer = setTimeout(() => {
+      timer = null
+      cell._suppressClick = true // neutralise le clic qui suit le relâchement
+      openContextMenu(sx, sy, getItems())
+    }, 500)
+  })
+  cell.addEventListener('pointermove', (e) => {
+    if (timer && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 10) cancel() // scroll/glissement -> annule
+  })
+  cell.addEventListener('pointerup', cancel)
+  cell.addEventListener('pointercancel', cancel)
+  cell.addEventListener('pointerleave', cancel)
+  cell.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    cell._suppressClick = true
+    openContextMenu(e.clientX, e.clientY, getItems())
+  })
+}
 
 /* ---------- Overlay de progression (publication) ---------- */
 const progress = {
