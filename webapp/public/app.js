@@ -80,7 +80,9 @@ function loadImageFile(file) {
       dzInner.classList.add('hidden')
       changeBtn.classList.remove('hidden')
       const dv = $('#decorVibe')
-      if (dv) dv.value = '' // reset l'orientation décor entre deux œuvres
+      if (dv) dv.value = '' // reset les entrées décor IA (pièce + ambiance) entre deux œuvres
+      const dr = $('#decorRoom')
+      if (dr) dr.value = ''
       state.decor = null
       renderMockups()
       renderSavedTemplates()

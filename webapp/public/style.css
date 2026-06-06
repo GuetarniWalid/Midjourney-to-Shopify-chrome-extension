@@ -79,7 +79,7 @@ body{
 .decor-result img{width:100%;border-radius:10px;border:1px solid var(--line);display:block}
 .decor-vibe{width:100%;padding:11px;border-radius:11px;border:1px solid var(--line);font-family:inherit;font-size:14px;background:var(--surface,#fff);color:var(--text)}
 .decor-vibe + .decor-vibe{margin-top:10px}
-select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer}
+select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:34px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%236b7686' stroke-width='1.6' d='M1 1.5 6 6.5 11 1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
 .decor-fidelity{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .decor-fidelity input{width:auto;margin:0}
 .ghost-btn{margin-top:12px;width:100%;padding:11px;border-radius:11px;border:1px solid var(--line);background:transparent;color:var(--text);font-weight:600;cursor:pointer}
