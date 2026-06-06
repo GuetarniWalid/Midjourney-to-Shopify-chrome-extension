@@ -302,7 +302,9 @@ app.delete('/api/mockup', async (req, res) => {
   try {
     const { psd, preview } = req.body || {};
     if (!psd) return res.status(400).json({ success: false, error: 'psd requis' });
-    const psdAbs = psdDiskPath(psd); // valide l'anti-traversal + le préfixe MOCKUPS_PATH
+    let psdAbs;
+    try { psdAbs = psdDiskPath(psd); } // anti-traversal : entrée client invalide -> 400 (pas 500)
+    catch { return res.status(400).json({ success: false, error: 'chemin invalide' }); }
     const dir = path.dirname(psdAbs); // dossier SOUS-CATÉGORIE du mockup
     const rel = path.relative(MOCKUPS_PATH, dir);
     if (!rel || rel.startsWith('..') || path.isAbsolute(rel))
