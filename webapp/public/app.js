@@ -817,7 +817,7 @@ function removeResult(id) {
   state.results = state.results.filter((r) => r.id !== id)
   renderResults()
   refreshAction()
-  if (res) fetch('/api/upload/' + res.url.split('/').pop(), { method: 'DELETE' }).catch(() => {})
+  if (res) fetch(RENDER + '/api/upload/' + res.url.split('/').pop(), { method: 'DELETE' }).catch(() => {})
 }
 function reorder(fromId, toId) {
   if (fromId === toId) return
