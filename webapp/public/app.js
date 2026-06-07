@@ -1017,11 +1017,16 @@ function armDrag() {
   drag.grabX = drag.lastX - r.left // offset du doigt DANS la cellule (mesuré à l'armement)
   drag.grabY = drag.lastY - r.top
   const grid = c.parentElement
+  grid.style.minHeight = grid.offsetHeight + 'px' // verrouille la hauteur le temps du glisser : le conteneur ne peut plus rétrécir -> pas de saut de scroll
   grid.classList.add('reordering') // -> touch-action:none sur les cellules + couche GPU
   try { c.setPointerCapture(drag.pointerId); drag.captured = true } catch (_) {}
   const ph = document.createElement('div')
   ph.className = 'result-cell placeholder'
-  ph.style.aspectRatio = '.8'
+  // taille EXPLICITE (px) = celle de la cellule soulevée. SURTOUT PAS aspect-ratio sur un élément vide :
+  // WebKit/mobile le résout de façon instable sous les reflows du FLIP (le trou seul dans sa rangée
+  // s'effondre 1 frame puis regrossit -> la hauteur du conteneur oscille -> saut de scroll). En px, tous d'accord.
+  ph.style.width = drag.w + 'px'
+  ph.style.height = drag.h + 'px'
   grid.insertBefore(ph, c)
   drag.placeholder = ph
   c.style.width = drag.w + 'px'
@@ -1113,6 +1118,7 @@ function finishDrop() {
     .filter(Boolean)
   state.results.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
   grid.classList.remove('reordering')
+  grid.style.minHeight = '' // déverrouille la hauteur avant la reconstruction (hauteur naturelle)
   renderResults() // reconstruit dans le nouvel ordre (détruit le proxy + le placeholder, renumérote)
   // FLIP d'atterrissage : la nouvelle cellule part visuellement de la position du doigt et glisse
   // jusqu'à son slot via la transition CSS de base. Aucun timer différé -> aucune course possible.
@@ -1143,7 +1149,7 @@ function teardownDrag() {
   try { if (cur.captured) c.releasePointerCapture(cur.pointerId) } catch (_) {}
   if (cur.placeholder) cur.placeholder.remove()
   const grid = $('#resultsGrid')
-  if (grid) grid.classList.remove('reordering')
+  if (grid) { grid.classList.remove('reordering'); grid.style.minHeight = '' }
   document.removeEventListener('pointermove', onDragMove)
   document.removeEventListener('pointerup', endDrag)
   document.removeEventListener('pointercancel', cancelDrag)
