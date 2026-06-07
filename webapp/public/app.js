@@ -946,6 +946,11 @@ async function insertFavoriteAi(ai, image, ori, product) {
 
 /* ---------- 4. Résultats + drag-drop UNIFIÉ (pointer events : souris === tactile) ---------- */
 function renderResults() {
+  // Si un glisser est en cours quand on reconstruit la grille (ex. un rendu asynchrone qui se
+  // termine), on l'annule proprement AVANT le innerHTML='' — sinon proxy/placeholder se retrouvent
+  // détachés (finishDrop planterait, page potentiellement bloquée non-scrollable). drag déjà nul
+  // sur les chemins normaux (dépose/annulation) -> no-op.
+  if (drag) teardownDrag()
   const grid = $('#resultsGrid'),
     empty = $('#resultsEmpty')
   grid.innerHTML = ''
@@ -970,81 +975,206 @@ function removeResult(id) {
   refreshAction()
   if (res && res.path) fetch(RENDER + '/api/upload/' + res.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
 }
-function reorder(fromId, toId) {
-  if (fromId === toId) return
-  const a = state.results.findIndex((r) => r.id === fromId)
-  const b = state.results.findIndex((r) => r.id === toId)
-  if (a < 0 || b < 0) return
-  const [moved] = state.results.splice(a, 1)
-  state.results.splice(b, 0, moved)
-  renderResults()
-}
-
-// Réorganisation par APPUI LONG puis glisser (sinon un mouvement = scroll de page).
-// pointer events (souris === tactile). Tap simple = agrandir. Tant que l'appui long n'a pas
-// « armé » le glisser, tout mouvement annule le geste et laisse le navigateur scroller.
-let drag = null // { id, cell, res, startX, startY, armed, moved, timer }
+// Réorganisation par APPUI LONG puis glisser — refonte « follow finger + push apart ».
+//
+// Bug historique : .result-cell avait touch-action:pan-y, ce qui AUTORISE le navigateur à
+// s'emparer d'un glisser vertical pour scroller la page (il émet alors un pointercancel qui coupe
+// le drag en plein vol). e.preventDefault() sur pointermove n'y peut RIEN : un pan déjà pris par le
+// compositeur ne se rend pas. On corrige en PRENANT la main une fois armé : setPointerCapture + un
+// listener touchmove NON-PASSIF (posé une fois sur la grille, donc présent dès le touchstart — seule
+// façon de bloquer un pan tactile) qui preventDefault tant qu'on glisse + touch-action:none sur les
+// cellules. Avant l'armement on garde pan-y pour que la longue liste scrolle nativement.
+//
+// UX : la cellule est SORTIE du flux (position:fixed) et suit le doigt ; un placeholder garde sa
+// place ; les voisines se poussent en fluide via FLIP ; auto-scroll quand le doigt frôle un bord.
+const ARM_MS = 350, MOVE_SLOP = 10, EDGE = 72, MAX_V = 18
+let drag = null
 
 function onDragMove(e) {
-  if (!drag) return
-  const dx = e.clientX - drag.startX,
-    dy = e.clientY - drag.startY
+  if (!drag || e.pointerId !== drag.pointerId) return // multi-touch : on ignore les autres doigts
+  drag.lastX = e.clientX
+  drag.lastY = e.clientY
   if (!drag.armed) {
-    // pas encore armé : un déplacement = intention de scroll -> on abandonne le glisser
-    if (Math.abs(dx) + Math.abs(dy) > 10) cancelDrag()
+    // pas encore armé : un déplacement = intention de scroll/tap -> on abandonne (pan-y scrolle)
+    if (Math.abs(e.clientX - drag.startX) + Math.abs(e.clientY - drag.startY) > MOVE_SLOP) cancelDrag()
     return
   }
+  e.preventDefault() // armé : on prend la main (le touchmove non-passif bloque déjà le scroll natif)
   drag.moved = true
-  e.preventDefault() // armé : on prend la main sur le geste (pas de scroll)
-  drag.cell.classList.add('dragging')
-  const el = document.elementFromPoint(e.clientX, e.clientY)
-  const target = el && el.closest('.result-cell')
-  $$('.result-cell').forEach((c) => c.classList.toggle('over', c === target && c !== drag.cell))
+  moveProxy(e.clientX, e.clientY)
+  computeScrollDir(e.clientY)
+  updateHover(e.clientX, e.clientY)
 }
+
+// Arme le glisser après l'appui long : on « soulève » la VRAIE cellule (pas un clone — les rendus
+// sont des data-URL base64 lourds à re-décoder) et on laisse un placeholder à sa place.
+function armDrag() {
+  if (!drag.cell.isConnected) { teardownDrag(); return } // cellule détachée entre-temps -> on abandonne
+  const c = drag.cell, r = c.getBoundingClientRect()
+  drag.armed = true
+  drag.w = r.width
+  drag.h = r.height
+  drag.grabX = drag.lastX - r.left // offset du doigt DANS la cellule (mesuré à l'armement)
+  drag.grabY = drag.lastY - r.top
+  const grid = c.parentElement
+  grid.classList.add('reordering') // -> touch-action:none sur les cellules + couche GPU
+  try { c.setPointerCapture(drag.pointerId); drag.captured = true } catch (_) {}
+  const ph = document.createElement('div')
+  ph.className = 'result-cell placeholder'
+  ph.style.aspectRatio = '.8'
+  grid.insertBefore(ph, c)
+  drag.placeholder = ph
+  c.style.width = drag.w + 'px'
+  c.style.height = drag.h + 'px'
+  c.classList.add('dragging', 'drag-armed')
+  moveProxy(drag.lastX, drag.lastY)
+  if (navigator.vibrate) navigator.vibrate(15) // retour haptique
+  startAutoScroll()
+}
+
+function moveProxy(px, py) {
+  drag.cell.style.transform = 'translate(' + (px - drag.grabX) + 'px,' + (py - drag.grabY) + 'px) scale(1.04)'
+}
+
+// Place le « trou » (placeholder) dans le DOM en fonction de la position du doigt, recalculée DE ZÉRO
+// à chaque mouvement (pas d'elementFromPoint : instable au niveau des frontières à cause du reflow).
+// On balaie les cellules en ORDRE DE LECTURE (haut->bas, gauche->droite) et on insère le trou avant la
+// 1re cellule « après » le doigt -> stable sous reflux, gère nativement la grille 2D (2 colonnes mobile).
+// Le FLIP (coûteux) ne tourne QUE si la position du trou change vraiment -> précis et sans thrash.
+function updateHover(px, py) {
+  const grid = drag.placeholder.parentElement
+  const cells = [...grid.children].filter((c) => c !== drag.cell && c !== drag.placeholder)
+  const first = new Map(cells.map((c) => [c, c.getBoundingClientRect()])) // 1 passe de rects (réutilisée FIRST)
+  let ref = null // noeud devant lequel insérer le trou ; null = en fin de liste
+  for (const c of cells) {
+    const r = first.get(c)
+    // le doigt est AVANT c si dans une rangée au-dessus, ou même rangée et à gauche du centre de c
+    if (py < r.top || (py <= r.bottom && px < r.left + r.width / 2)) { ref = c; break }
+  }
+  if (drag.placeholder.nextSibling === ref) return // le trou est déjà à cette place -> aucun FLIP
+  grid.insertBefore(drag.placeholder, ref)
+  for (const c of cells) { // LAST + INVERT (réutilise les rects FIRST)
+    const a = first.get(c), b = c.getBoundingClientRect()
+    const dx = a.left - b.left, dy = a.top - b.top
+    if (dx || dy) { c.style.transition = 'none'; c.style.transform = 'translate(' + dx + 'px,' + dy + 'px)' }
+  }
+  requestAnimationFrame(() => { // PLAY : on relâche -> la transition CSS ramène à 0 en fluide
+    for (const c of cells) { c.style.transition = ''; c.style.transform = '' }
+  })
+}
+
+// Auto-scroll : tant que le doigt est dans la bande haute/basse de l'écran, on fait défiler la page
+// (rAF) et on re-teste ce qui passe sous le doigt immobile -> on atteint des slots hors écran.
+function computeScrollDir(y) {
+  const vh = window.innerHeight
+  if (y < EDGE) drag.scrollDir = -(1 - y / EDGE)
+  else if (y > vh - EDGE) drag.scrollDir = 1 - (vh - y) / EDGE
+  else drag.scrollDir = 0
+}
+function startAutoScroll() {
+  const tick = () => {
+    if (!drag || !drag.armed) return
+    if (drag.scrollDir) {
+      window.scrollBy(0, drag.scrollDir * MAX_V)
+      moveProxy(drag.lastX, drag.lastY) // position:fixed -> on garde le proxy collé au doigt
+      updateHover(drag.lastX, drag.lastY) // un nouveau contenu défile sous le doigt
+    }
+    drag.raf = requestAnimationFrame(tick)
+  }
+  drag.raf = requestAnimationFrame(tick)
+}
+
 function endDrag(e) {
-  if (!drag) return
+  if (!drag || (e.pointerId != null && e.pointerId !== drag.pointerId)) return
+  if (drag.armed) { finishDrop(); return } // dépose (avec ou sans déplacement)
   const cur = drag
   teardownDrag()
-  $$('.result-cell').forEach((c) => c.classList.remove('over'))
-  cur.cell.classList.remove('dragging', 'drag-armed')
-  if (cur.armed && cur.moved) {
-    const el = document.elementFromPoint(e.clientX, e.clientY)
-    const target = el && el.closest('.result-cell')
-    if (target && target.dataset.id !== cur.id) reorder(cur.id, target.dataset.id)
-  } else if (!cur.armed) {
-    openLightbox(cur.res.url) // tap simple (pas d'appui long) -> agrandir
-  }
-  // armé sans déplacement -> no-op (appui long relâché sur place)
+  openLightbox(cur.res.url) // tap simple (pas d'appui long) -> agrandir
 }
-function cancelDrag() {
-  if (!drag) return
-  drag.cell.classList.remove('dragging', 'drag-armed')
-  $$('.result-cell').forEach((c) => c.classList.remove('over')) // pas de surbrillance figée après un pointercancel
-  teardownDrag()
-}
-function teardownDrag() {
-  if (drag && drag.timer) clearTimeout(drag.timer)
+
+// Dépose : on fige le nouvel ordre IMMÉDIATEMENT (pas de commit différé — sinon un callback en
+// retard d'une dépose précédente viendrait perturber un glisser suivant), PUIS on anime l'atterrissage
+// en FLIP sur la vraie cellule fraîchement rendue (de la position du doigt jusqu'à son slot).
+// L'ordre est lu depuis le DOM, le placeholder tenant la place de l'oeuvre glissée — exact pour
+// toutes les positions (fin de liste comprise).
+function finishDrop() {
+  const cur = drag
+  drag = null
+  if (cur.timer) clearTimeout(cur.timer)
+  if (cur.raf) cancelAnimationFrame(cur.raf)
   document.removeEventListener('pointermove', onDragMove)
   document.removeEventListener('pointerup', endDrag)
   document.removeEventListener('pointercancel', cancelDrag)
+  try { if (cur.captured) cur.cell.releasePointerCapture(cur.pointerId) } catch (_) {}
+  const grid = cur.placeholder.parentElement
+  const from = cur.cell.getBoundingClientRect() // où le doigt a lâché la cellule flottante
+  const order = [...grid.children]
+    .map((n) => (n === cur.placeholder ? cur.id : n === cur.cell ? null : n.dataset.id))
+    .filter(Boolean)
+  state.results.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
+  grid.classList.remove('reordering')
+  renderResults() // reconstruit dans le nouvel ordre (détruit le proxy + le placeholder, renumérote)
+  // FLIP d'atterrissage : la nouvelle cellule part visuellement de la position du doigt et glisse
+  // jusqu'à son slot via la transition CSS de base. Aucun timer différé -> aucune course possible.
+  const fresh = [...grid.children].find((c) => c.dataset && c.dataset.id === cur.id)
+  if (fresh) {
+    const to = fresh.getBoundingClientRect()
+    fresh.style.transition = 'none'
+    fresh.style.transform = 'translate(' + (from.left - to.left) + 'px,' + (from.top - to.top) + 'px) scale(1.04)'
+    requestAnimationFrame(() => { fresh.style.transition = ''; fresh.style.transform = '' })
+  }
+}
+
+function cancelDrag() {
+  if (!drag) return
+  const armed = drag.armed
+  teardownDrag()
+  if (armed) renderResults() // resynchronise les voisines à demi-FLIP après un pointercancel
+}
+function teardownDrag() {
+  if (!drag) return
+  const cur = drag
   drag = null
+  if (cur.timer) clearTimeout(cur.timer)
+  if (cur.raf) cancelAnimationFrame(cur.raf)
+  const c = cur.cell
+  c.classList.remove('dragging', 'drag-armed')
+  c.style.transform = c.style.width = c.style.height = c.style.transition = ''
+  try { if (cur.captured) c.releasePointerCapture(cur.pointerId) } catch (_) {}
+  if (cur.placeholder) cur.placeholder.remove()
+  const grid = $('#resultsGrid')
+  if (grid) grid.classList.remove('reordering')
+  document.removeEventListener('pointermove', onDragMove)
+  document.removeEventListener('pointerup', endDrag)
+  document.removeEventListener('pointercancel', cancelDrag)
 }
 function attachDrag(cell, res) {
   cell.addEventListener('pointerdown', (e) => {
     if (e.button !== undefined && e.button !== 0) return // clic gauche / tactile uniquement
     if (e.target.closest('.del')) return // pas sur le bouton supprimer
-    drag = { id: cell.dataset.id, cell, res, startX: e.clientX, startY: e.clientY, armed: false, moved: false, timer: null }
-    drag.timer = setTimeout(() => {
-      if (!drag) return
-      drag.armed = true // appui long maintenu sur place -> le glisser est prêt
-      cell.classList.add('drag-armed')
-      if (navigator.vibrate) navigator.vibrate(15) // retour haptique
-    }, 350)
+    if (drag) return // un glisser est déjà en cours (2e doigt) -> on ne l'interrompt pas
+    drag = {
+      id: cell.dataset.id, cell, res, pointerId: e.pointerId,
+      startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
+      armed: false, moved: false, captured: false, placeholder: null,
+      w: 0, h: 0, grabX: 0, grabY: 0, scrollDir: 0, raf: 0, timer: null,
+    }
+    drag.timer = setTimeout(() => { if (drag) armDrag() }, ARM_MS)
     document.addEventListener('pointermove', onDragMove, { passive: false })
     document.addEventListener('pointerup', endDrag)
     document.addEventListener('pointercancel', cancelDrag)
   })
+  cell.addEventListener('dragstart', (e) => e.preventDefault()) // pas de drag natif HTML5 (desktop)
 }
+
+// Garde-fou anti-scroll : UN SEUL listener touchmove NON-PASSIF, posé une fois sur la grille (donc
+// présent dès le touchstart, condition sine qua non pour bloquer un pan tactile). Tant que le glisser
+// n'est pas armé il ne fait RIEN -> la liste scrolle normalement.
+;(function initTouchGuard() {
+  const grid = $('#resultsGrid')
+  if (!grid) return
+  grid.addEventListener('touchmove', (e) => { if (drag && drag.armed) e.preventDefault() }, { passive: false })
+})()
 
 /* ---------- Lightbox ---------- */
 const lightbox = $('#lightbox')

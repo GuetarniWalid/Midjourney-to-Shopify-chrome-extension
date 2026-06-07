@@ -189,11 +189,18 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 /* ---- rendus / drag-drop ---- */
 .results-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr));gap:var(--s4)}
 .result-cell{position:relative;min-width:0;border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--border);
-  background:var(--surface-2);aspect-ratio:.8;cursor:grab;touch-action:pan-y; /* scroll vertical natif tant que l'appui long n'a pas armé */
+  background:var(--surface-2);aspect-ratio:.8;cursor:grab;touch-action:pan-y; /* AU REPOS : scroll vertical natif de la page */
   transition:transform var(--dur-ui) var(--ease-std),box-shadow var(--dur-ui) var(--ease-std)}
-.result-cell.drag-armed{transform:scale(1.03);box-shadow:var(--shadow-md);z-index:3} /* appui long armé : prêt à glisser */
-.result-cell.dragging{opacity:.9;cursor:grabbing;box-shadow:var(--shadow-md)}
-.result-cell.over{outline:2px solid var(--accent);outline-offset:-2px}
+/* Pendant un réordonnancement : plus de scroll natif sur les cellules (ceinture+bretelles avec le
+   preventDefault du touchmove) + promotion en couche GPU le temps du glisser. */
+.results-grid.reordering .result-cell{touch-action:none;will-change:transform}
+.result-cell.drag-armed{box-shadow:var(--shadow-md);z-index:3} /* appui long armé : prêt à glisser */
+/* Cellule glissée : SORTIE du flux, elle suit le doigt (transform posé en JS). pointer-events:none
+   pour que elementFromPoint voie le voisin dessous. z-index 49 = juste SOUS la lightbox (50). */
+.result-cell.dragging{position:fixed;left:0;top:0;margin:0;z-index:49;pointer-events:none;cursor:grabbing;
+  box-shadow:var(--shadow-lg);will-change:transform;transition:none}
+/* Placeholder : garde la place dans la grille (même taille) et matérialise le « trou » qui se déplace. */
+.result-cell.placeholder{visibility:hidden}
 .result-cell img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
 .result-cell .num{position:absolute;top:var(--s2);left:var(--s2);min-width:22px;height:22px;padding:0 6px;border-radius:var(--pill);
   background:var(--accent);color:#fff;font-size:12px;font-weight:600;display:grid;place-items:center}
