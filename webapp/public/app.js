@@ -94,6 +94,7 @@ function loadImageFile(file) {
       const dr = $('#decorRoom')
       if (dr) dr.value = ''
       state.decor = null
+      clearCollection() // nouvelle œuvre = on oublie la collection choisie (sinon risque de publier dans la mauvaise)
       clearResults() // nouvelle œuvre = nouvelle session de rendus
       renderMockups()
       refreshAction()
