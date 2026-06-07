@@ -988,7 +988,7 @@ function removeResult(id) {
 //
 // UX : la cellule est SORTIE du flux (position:fixed) et suit le doigt ; un placeholder garde sa
 // place ; les voisines se poussent en fluide via FLIP ; auto-scroll quand le doigt frôle un bord.
-const ARM_MS = 350, MOVE_SLOP = 10, EDGE = 72, MAX_V = 18
+const ARM_MS = 350, MOVE_SLOP = 10, EDGE = 64, MAX_V = 16, EDGE_DELAY = 200, EDGE_RAMP = 320
 let drag = null
 
 function onDragMove(e) {
@@ -1035,6 +1035,10 @@ function armDrag() {
   c.classList.add('dragging', 'drag-armed')
   moveProxy(drag.lastX, drag.lastY)
   if (navigator.vibrate) navigator.vibrate(15) // retour haptique
+  // mesure une fois le « chrome » fixe (header collant + barre d'action) pour caler les bandes d'auto-scroll
+  const hdr = document.querySelector('.topbar'), ftr = document.querySelector('.actionbar')
+  drag.edgeTop = hdr ? hdr.getBoundingClientRect().bottom : 0
+  drag.edgeBottom = ftr ? ftr.getBoundingClientRect().top : window.innerHeight
   startAutoScroll()
 }
 
@@ -1069,21 +1073,34 @@ function updateHover(px, py) {
   })
 }
 
-// Auto-scroll : tant que le doigt est dans la bande haute/basse de l'écran, on fait défiler la page
-// (rAF) et on re-teste ce qui passe sous le doigt immobile -> on atteint des slots hors écran.
+// Auto-scroll de bord — pour traverser une longue liste. Mais on NE défile PAS dès qu'on frôle le
+// bord : sinon un simple passage par la bande haute/basse en changeant de rangée ferait défiler la
+// page (ce que l'utilisateur prenait pour un « saut »). Il faut que le doigt S'ATTARDE au bord
+// (EDGE_DELAY) avant que ça démarre, puis montée en douceur (EDGE_RAMP). Un aller-retour rapide ne
+// déclenche donc rien ; seul un maintien volontaire au bord fait défiler.
 function computeScrollDir(y) {
-  const vh = window.innerHeight
-  if (y < EDGE) drag.scrollDir = -(1 - y / EDGE)
-  else if (y > vh - EDGE) drag.scrollDir = 1 - (vh - y) / EDGE
+  // bandes calées sur la zone VISIBLE (entre le bas du header collant et le haut de la barre d'action
+  // fixe), pas sur le viewport brut — sinon la bande basse tombe SOUS la barre et le scroll vers le bas
+  // serait injoignable. Vitesse max au bord réellement touchable (juste sous le header / au-dessus de la barre).
+  const top = drag.edgeTop, bottom = drag.edgeBottom || window.innerHeight
+  if (y < top + EDGE) drag.scrollDir = -(1 - Math.max(0, y - top) / EDGE)
+  else if (y > bottom - EDGE) drag.scrollDir = Math.min(1, (y - (bottom - EDGE)) / EDGE)
   else drag.scrollDir = 0
 }
 function startAutoScroll() {
-  const tick = () => {
+  const tick = (ts) => {
     if (!drag || !drag.armed) return
     if (drag.scrollDir) {
-      window.scrollBy(0, drag.scrollDir * MAX_V)
-      moveProxy(drag.lastX, drag.lastY) // position:fixed -> on garde le proxy collé au doigt
-      updateHover(drag.lastX, drag.lastY) // un nouveau contenu défile sous le doigt
+      if (!drag.edgeSince) drag.edgeSince = ts // 1re frame au bord -> on démarre le compteur d'attente
+      const held = ts - drag.edgeSince
+      if (held >= EDGE_DELAY) {
+        const ramp = Math.min(1, (held - EDGE_DELAY) / EDGE_RAMP) // 0 -> 1 : démarrage doux, pas de à-coup
+        window.scrollBy(0, drag.scrollDir * MAX_V * ramp)
+        moveProxy(drag.lastX, drag.lastY) // position:fixed -> on garde le proxy collé au doigt
+        updateHover(drag.lastX, drag.lastY) // un nouveau contenu défile sous le doigt
+      }
+    } else {
+      drag.edgeSince = 0 // sorti de la zone -> on réarme le délai (un simple passage ne scrolle jamais)
     }
     drag.raf = requestAnimationFrame(tick)
   }
@@ -1164,7 +1181,7 @@ function attachDrag(cell, res) {
       id: cell.dataset.id, cell, res, pointerId: e.pointerId,
       startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
       armed: false, moved: false, captured: false, placeholder: null,
-      w: 0, h: 0, grabX: 0, grabY: 0, scrollDir: 0, raf: 0, timer: null,
+      w: 0, h: 0, grabX: 0, grabY: 0, scrollDir: 0, edgeSince: 0, edgeTop: 0, edgeBottom: 0, raf: 0, timer: null,
     }
     drag.timer = setTimeout(() => { if (drag) armDrag() }, ARM_MS)
     document.addEventListener('pointermove', onDragMove, { passive: false })
