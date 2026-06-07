@@ -3,8 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f1115">
+<meta name="theme-color" content="#FCFCFD">
 <title>MyselfMonArt · Publisher</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -28,14 +31,14 @@
         <input type="file" id="fileInput" accept="image/*" hidden>
         <div class="dz-inner" id="dzInner">
           <div class="dz-icon">⬆</div>
-          <div class="dz-text"><b>Touchez pour choisir</b><span>ou glissez une image ici</span></div>
+          <div class="dz-text"><b>Touchez pour choisir une image</b><span>ou glissez-la ici</span></div>
         </div>
         <div class="preview-wrap">
           <img id="sourcePreview" class="source-preview hidden" alt="aperçu">
           <div id="ratioOverlay" class="ratio-overlay hidden"></div>
         </div>
       </label>
-      <p id="ratioWarning" class="ratio-warning hidden">⚠️ Format non conforme — le cadre pointillé montre le format attendu.</p>
+      <p id="ratioWarning" class="ratio-warning hidden">⚠️ Format à ajuster — le cadre pointillé montre le format attendu.</p>
       <div class="upload-actions">
         <button id="changeImageBtn" class="ghost-btn hidden">Changer d'image</button>
         <button id="resizeBtn" class="accent-btn hidden">Retailler au bon format</button>
@@ -62,34 +65,25 @@
       </div>
     </section>
 
-    <!-- 3. Mockups -->
+    <!-- 3. Mockups (catalogue Photopea + décors IA, regroupés par pièce) -->
     <section class="card" id="mockupsCard">
       <div class="card-head">
         <h2 class="card-title">3 · Mockups</h2>
-        <span id="mockupsHint" class="hint">Choisissez une image d'abord</span>
+        <span id="mockupsHint" class="hint">Ajoutez une image pour voir les mockups</span>
       </div>
+      <p class="card-note">Appui long sur un mockup pour le mettre en favori ★. Vos favoris s'appliquent automatiquement dès que votre image est au bon format.</p>
       <div id="mockupGrid" class="mockup-grid"></div>
-      <button id="decorBtn" class="ghost-btn decor-cta hidden">🎨 Générer un décor sur-mesure (IA)</button>
+      <button id="decorBtn" class="ghost-btn decor-cta hidden">🎨 Créer un décor sur-mesure (IA)</button>
     </section>
 
-    <!-- 3b. Templates sauvegardés (réutilisables pour toujours) — regroupés UNIQUEMENT par pièce -->
-    <section class="card" id="savedCard">
-      <div class="card-head">
-        <h2 class="card-title">★ Mes templates sauvegardés</h2>
-        <span id="savedHint" class="hint">Appui long → options</span>
-      </div>
-      <div id="savedGroups"></div>
-      <p id="savedEmpty" class="empty">Aucun template sauvegardé. Appui long sur un mockup pour l'ajouter aux favoris, ou générez puis « Sauvegarder » un décor IA.</p>
-    </section>
-
-    <!-- 4. Résultats -->
+    <!-- 4. Rendus -->
     <section class="card" id="resultsCard">
       <div class="card-head">
-        <h2 class="card-title">4 · Rendus générés</h2>
-        <span class="hint">Glissez pour réorganiser</span>
+        <h2 class="card-title">4 · Vos rendus</h2>
+        <span class="hint">Appui long puis glissez pour réorganiser</span>
       </div>
       <div id="resultsGrid" class="results-grid"></div>
-      <p id="resultsEmpty" class="empty">Aucun rendu pour l'instant. Touchez un mockup ci-dessus pour générer.</p>
+      <p id="resultsEmpty" class="empty">Touchez un mockup ci-dessus pour générer votre premier rendu.</p>
     </section>
 
   </main>
@@ -97,7 +91,7 @@
   <!-- Barre d'action fixe -->
   <footer class="actionbar">
     <div class="action-info" id="actionInfo">—</div>
-    <button id="publishBtn" class="primary-btn" disabled>Publier</button>
+    <button id="publishBtn" class="primary-btn" disabled>Publier l'œuvre</button>
   </footer>
 
   <!-- Overlay agrandissement -->
@@ -167,7 +161,7 @@
       </div>
       <div id="decorActions" class="resize-actions hidden">
         <button id="decorValidate" class="primary-btn">Valider ce décor</button>
-        <button id="decorSave" class="ghost-btn">★ Sauvegarder ce décor</button>
+        <button id="decorSave" class="ghost-btn">★ Enregistrer ce décor</button>
         <button id="decorRegen" class="ghost-btn">Régénérer</button>
         <button id="decorClose" class="ghost-btn">Fermer</button>
       </div>

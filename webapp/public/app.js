@@ -34,6 +34,8 @@ const state = {
   results: [], // [{id, url, context, label}]
   saved: { photopea: [], ai: [] }, // templates sauvegardés "pour toujours"
   favPsds: new Set(), // chemins PSD favoris (pour l'état des étoiles)
+  lastBatchImage: null, // dernière œuvre pour laquelle les favoris ont été appliqués auto
+  batchToken: null, // jeton du lot de favoris courant (sert à annuler un lot devenu périmé)
 }
 
 /* ---------- Toast ---------- */
@@ -92,9 +94,10 @@ function loadImageFile(file) {
       const dr = $('#decorRoom')
       if (dr) dr.value = ''
       state.decor = null
+      clearResults() // nouvelle œuvre = nouvelle session de rendus
       renderMockups()
-      renderSavedTemplates()
       refreshAction()
+      maybeRunFavorites() // image déjà au bon format -> applique les favoris automatiquement
     }
     img.src = reader.result
   }
@@ -265,8 +268,8 @@ function applyResizedImage(dataUrl) {
     detectOrientation(img.naturalWidth, img.naturalHeight)
     sourcePreview.src = dataUrl
     renderMockups()
-    renderSavedTemplates()
     refreshAction()
+    maybeRunFavorites() // l'image est maintenant au bon format -> favoris automatiques
   }
   img.src = dataUrl
 }
@@ -316,8 +319,8 @@ async function callDecorJob(body) {
 // Ouvre l'overlay en état "prêt" : le champ d'orientation + le bouton Générer sont visibles
 // AVANT toute génération (on peut donc orienter dès le 1er décor).
 function openDecorOverlay() {
-  if (!state.imageDataUrl) return toast("Choisis une image d'abord", 'err')
-  if (state.needsResize) return toast("Retaille d'abord l'image au bon format", 'err')
+  if (!state.imageDataUrl) return toast("Ajoutez d'abord une image", 'err')
+  if (state.needsResize) return toast("Retaillez d'abord l'image au bon format", 'err')
   $('#decorOverlay').classList.remove('hidden')
   $('#decorLoading').classList.add('hidden')
   $('#decorResult').classList.add('hidden')
@@ -325,8 +328,8 @@ function openDecorOverlay() {
   $('#decorStartActions').classList.remove('hidden')
 }
 async function runDecorGenerate() {
-  if (!state.imageDataUrl) return toast("Choisis une image d'abord", 'err')
-  if (state.needsResize) return toast("Retaille d'abord l'image au bon format", 'err')
+  if (!state.imageDataUrl) return toast("Ajoutez d'abord une image", 'err')
+  if (state.needsResize) return toast("Retaillez d'abord l'image au bon format", 'err')
   showDecorLoading('Génération du décor sur-mesure… (~1-2 min)')
   try {
     const product = productOf(state.productType)
@@ -382,7 +385,7 @@ function showInsertLoading(msg) {
   $('#insertActions').classList.add('hidden')
 }
 function openInsertOverlay() {
-  if (!state.decor || !state.imageDataUrl) return toast('Valide d’abord un décor', 'err')
+  if (!state.decor || !state.imageDataUrl) return toast('Validez d’abord un décor', 'err')
   $('#insertOverlay').classList.remove('hidden')
   $('#insertLoading').classList.add('hidden')
   $('#insertResult').classList.add('hidden')
@@ -422,7 +425,7 @@ async function callInsertJob(body) {
 }
 // Re-roll : repart TOUJOURS du décor validé + l'œuvre d'origine (jamais d'un rendu précédent).
 async function runInsertGenerate() {
-  if (!state.decor || !state.imageDataUrl) return toast('Valide d’abord un décor', 'err')
+  if (!state.decor || !state.imageDataUrl) return toast('Validez d’abord un décor', 'err')
   showInsertLoading('Insertion de votre œuvre dans le décor… (~1-2 min)')
   try {
     const product = productOf(state.productType)
@@ -467,7 +470,7 @@ $('#insertValidate').addEventListener('click', () => {
   refreshAction()
   $('#insertOverlay').classList.add('hidden')
   lastInsert = null
-  toast('Rendu ajouté à tes rendus ✓', 'ok')
+  toast('Rendu ajouté ✓', 'ok')
 })
 
 /* ---------- 2. Type produit + collections ---------- */
@@ -486,15 +489,18 @@ $$('#productType .seg-btn').forEach((btn) =>
     clearResults()
     clearCollection()
     loadCollections()
-    loadTemplates() // les mockups dépendent maintenant du type de produit
-    renderSavedTemplates() // re-filtre les templates sauvegardés sur le nouveau type
+    loadTemplates() // recharge le catalogue + re-rend les décors IA du nouveau type (inclut renderMockups)
+    state.lastBatchImage = null // nouveau type = nouveau jeu de favoris -> ré-application auto
+    maybeRunFavorites()
   })
 )
 
 // Vide la galerie de rendus (et supprime les fichiers serveur correspondants)
 function clearResults() {
+  state.batchToken = {} // périme tout lot de favoris en cours -> ses écritures seront ignorées
+  // seuls les rendus Photopea ont un fichier temp serveur (res.path) ; les rendus IA sont des data URI
   for (const r of state.results)
-    fetch(RENDER + '/api/upload/' + r.url.split('/').pop(), { method: 'DELETE' }).catch(() => {})
+    if (r.path) fetch(RENDER + '/api/upload/' + r.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
   state.results = []
   renderResults()
   refreshAction()
@@ -571,60 +577,95 @@ async function loadTemplates() {
   renderMockups() // rafraîchit la grille pour le nouveau type
 }
 
+// ★ favori : étoile pleine SVG (élégante), colorée via CSS, cible tappable élargie en CSS.
+const STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2.82 5.72 6.31.92-4.57 4.45 1.08 6.29L12 17.9l-5.64 2.96 1.08-6.29L2.87 9.24l6.31-.92z"/></svg>'
+const favStarHtml = (on) =>
+  on ? `<span class="mc-fav-badge" title="Favori — appliqué automatiquement à votre œuvre" aria-label="Favori">${STAR_SVG}</span>` : ''
+
+// Section « Mockups » UNIFIÉE : catalogue Photopea + décors IA enregistrés, regroupés PAR PIÈCE.
+// Un signe PS/IA distingue l'origine ; l'étoile marque un favori (rendu auto quand l'image est prête).
 function renderMockups() {
   const grid = $('#mockupGrid'),
     hint = $('#mockupsHint')
   grid.innerHTML = ''
-  grid.classList.toggle('disabled', !!state.needsResize) // bloque les clics tant que format non conforme
+  grid.classList.toggle('disabled', !!state.needsResize)
   const decorBtn = $('#decorBtn')
   if (decorBtn) decorBtn.classList.toggle('hidden', !(state.orientation && !state.needsResize))
   if (!state.orientation) {
-    hint.textContent = "Choisissez une image d'abord"
+    hint.textContent = 'Ajoutez une image pour voir les mockups'
     return
   }
-
   const ori = state.orientation
-  let count = 0
+  // entrées unifiées groupées par pièce : catalogue Photopea + décors IA sauvegardés
+  const groups = {}
+  const push = (room, e) => (groups[room] = groups[room] || []).push(e)
   for (const cat of state.templates) {
-    const subs = cat.subcategories.filter((s) => s.layouts[ori]) // filtre par orientation dispo
-    if (!subs.length) continue
+    for (const sub of cat.subcategories) {
+      const L = sub.layouts[ori]
+      if (L) push(cat.name, { kind: 'photopea', cat, sub, L })
+    }
+  }
+  for (const t of state.saved.ai.filter((t) => !t.product || PRODUCT_TO_TYPE[t.product] === state.productType)) {
+    push(roomLabelOf(t.roomType), { kind: 'ai', data: t })
+  }
+  const rooms = Object.keys(groups).sort((a, b) => (a === 'Autre') - (b === 'Autre') || a.localeCompare(b, 'fr'))
+  let count = 0
+  for (const room of rooms) {
     const head = document.createElement('div')
     head.className = 'mockup-cat'
-    head.textContent = cat.name
+    head.textContent = room
     grid.appendChild(head)
-    for (const sub of subs) {
-      const L = sub.layouts[ori]
-      const cell = document.createElement('div')
-      cell.className = 'mockup-cell'
-      const isFav = state.favPsds.has(L.psd)
-      // plus d'étoile cliquable « au départ » : seul un petit ★ de STATUT si déjà en favori.
-      // Favori + suppression passent par l'appui long (menu contextuel).
-      cell.innerHTML = `${isFav ? '<span class="mc-faved" title="Déjà dans vos favoris">★</span>' : ''}${L.preview ? `<img src="${renderUrl(L.preview)}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(sub.name)}</div>`
-      cell.addEventListener('click', () => {
-        if (cell._suppressClick) { cell._suppressClick = false; return } // clic « fantôme » après long-press
-        generate(cat.name, sub, L, cell)
-      })
-      attachLongPress(cell, () => {
-        const fav = state.favPsds.has(L.psd)
-        const favInfo = { type: state.productType, category: cat.name, subName: sub.name, psd: L.psd, preview: L.preview || null, orientation: ori, context: sub.context || `${cat.name} - ${sub.name}` }
-        return [
-          { label: fav ? '★ Retirer des favoris' : '★ Ajouter aux favoris', onClick: () => toggleFavorite(favInfo) },
-          { label: '🗑 Supprimer du disque', danger: true, onClick: () => deleteMockup({ psd: L.psd, preview: L.preview || null, name: sub.name }) },
-        ]
-      })
-      grid.appendChild(cell)
+    for (const e of groups[room]) {
+      grid.appendChild(buildMockupCell(e, ori))
       count++
     }
   }
   if (state.needsResize) {
-    hint.textContent = "⚠️ Retaille l'image au bon format pour débloquer les mockups"
+    hint.textContent = "⚠️ Retaillez l'image au bon format pour débloquer les mockups"
   } else {
-    hint.textContent = count
-      ? `${count} mockup(s) en ${labelOri(ori)}`
-      : 'Aucun mockup pour cette orientation'
-    if (!count)
-      grid.innerHTML = `<div class="mockup-empty">Aucun mockup disponible en ${labelOri(ori)}.</div>`
+    hint.textContent = count ? `${count} mockup(s) en ${labelOri(ori)}` : `Aucun mockup en ${labelOri(ori)}`
+    if (!count) grid.innerHTML = `<div class="mockup-empty">Aucun mockup disponible en ${labelOri(ori)}.</div>`
   }
+}
+
+// Vignette de la section Mockups : mockup Photopea (PS) OU décor IA enregistré (IA).
+// Tap = générer / réutiliser ; appui long = menu (favori / suppression).
+function buildMockupCell(e, ori) {
+  const cell = document.createElement('div')
+  if (e.kind === 'photopea') {
+    const { cat, sub, L } = e
+    const isFav = state.favPsds.has(L.psd)
+    cell.className = 'mockup-cell'
+    cell.innerHTML = `<span class="mc-kind pp" title="Mockup Photopea">PS</span>${favStarHtml(isFav)}${L.preview ? `<img src="${renderUrl(L.preview)}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(sub.name)}</div>`
+    cell.addEventListener('click', () => {
+      if (cell._suppressClick) { cell._suppressClick = false; return }
+      generate(cat.name, sub, L, cell)
+    })
+    attachLongPress(cell, () => {
+      const fav = state.favPsds.has(L.psd)
+      const favInfo = { type: state.productType, category: cat.name, subName: sub.name, psd: L.psd, preview: L.preview || null, orientation: ori, context: sub.context || `${cat.name} - ${sub.name}` }
+      return [
+        { label: fav ? '★ Retirer des favoris' : '★ Ajouter aux favoris', onClick: () => toggleFavorite(favInfo) },
+        { label: '🗑 Supprimer du disque', danger: true, onClick: () => deleteMockup({ psd: L.psd, preview: L.preview || null, name: sub.name }) },
+      ]
+    })
+  } else {
+    const t = e.data
+    const oriT = t.orientation
+    const compatible = !oriT || oriT === ori
+    cell.className = 'mockup-cell saved-cell' + (compatible ? '' : ' incompatible')
+    cell.title = compatible ? '' : `Décor en ${labelOri(oriT)} — changez l'orientation de l'image`
+    cell.innerHTML = `<span class="mc-kind ai" title="Décor généré par IA">IA</span>${favStarHtml(!!t.favorite)}<img src="${renderUrl(t.url)}" loading="lazy" alt=""><div class="mc-label">${escapeHtml(t.theme || 'Décor IA')}</div>`
+    cell.addEventListener('click', () => {
+      if (cell._suppressClick) { cell._suppressClick = false; return }
+      reuseSavedDecor(t)
+    })
+    attachLongPress(cell, () => [
+      { label: t.favorite ? '★ Retirer des favoris' : '★ Ajouter aux favoris', onClick: () => toggleAiFavorite(t) },
+      { label: '🗑 Supprimer', danger: true, onClick: () => deleteSaved('ai', t.id) },
+    ])
+  }
+  return cell
 }
 const labelOri = (o) => ({ portrait: 'portrait', landscape: 'paysage', square: 'carré' })[o] || o
 
@@ -636,7 +677,7 @@ function generate(catName, sub, layout, cell) {
 async function renderWithPsd({ psd, context, label }, cell) {
   if (!state.imageDataUrl) return toast('Choisissez une image', 'err')
   if (state.needsResize)
-    return toast("Retaille d'abord l'image au bon format (3:4, carré ou 4:3)", 'err')
+    return toast("Retaillez d'abord l'image (3:4, carré ou 4:3)", 'err')
   cell.classList.add('busy')
   const spin = document.createElement('div')
   spin.className = 'spin'
@@ -692,8 +733,7 @@ async function loadSavedTemplates() {
     state.saved = { photopea: [], ai: [] }
   }
   state.favPsds = new Set(state.saved.photopea.map((t) => t.psd))
-  renderSavedTemplates()
-  renderMockups() // rafraîchit l'état des étoiles
+  renderMockups() // catalogue Photopea + décors IA + état des favoris
 }
 
 // Ajoute/retire un favori Photopea (toggle par chemin PSD).
@@ -703,7 +743,7 @@ async function toggleFavorite(info) {
     if (existing) {
       const r = await fetch(RENDER + '/api/saved-templates/photopea/' + existing.id, { method: 'DELETE' })
       if (!r.ok) throw new Error('suppression échouée')
-      toast('Favori retiré', 'ok')
+      toast('Retiré des favoris', 'ok')
     } else {
       const r = await fetch(RENDER + '/api/saved-templates/photopea', {
         method: 'POST',
@@ -715,7 +755,7 @@ async function toggleFavorite(info) {
         }),
       })
       if (!r.ok) throw new Error('sauvegarde échouée')
-      toast('Template sauvegardé ★', 'ok')
+      toast('Favori enregistré ★', 'ok')
     }
     await loadSavedTemplates()
   } catch (e) {
@@ -742,7 +782,7 @@ async function saveAiDecor() {
     })
     const data = await r.json()
     if (!data.success) throw new Error(data.error || 'échec')
-    toast('Décor sauvegardé ★', 'ok')
+    toast('Décor enregistré ★', 'ok')
     await loadSavedTemplates()
   } catch (e) {
     toast('Erreur : ' + e.message, 'err')
@@ -790,10 +830,10 @@ async function deleteMockup({ psd, preview, name }) {
 
 // Réutilise un décor IA sauvegardé : on le recharge comme décor validé puis on ouvre l'insertion.
 async function reuseSavedDecor(tpl) {
-  if (!state.imageDataUrl) return toast("Choisis une image d'abord", 'err')
-  if (state.needsResize) return toast("Retaille d'abord l'image au bon format", 'err')
+  if (!state.imageDataUrl) return toast("Ajoutez d'abord une image", 'err')
+  if (state.needsResize) return toast("Retaillez d'abord l'image au bon format", 'err')
   if (tpl.orientation && tpl.orientation !== state.orientation)
-    return toast(`Ce décor est en ${labelOri(tpl.orientation)} — change d'orientation d'image`, 'err')
+    return toast(`Ce décor est en ${labelOri(tpl.orientation)} — changez l'orientation de l'image`, 'err')
   try {
     state.decor = await urlToDataUrl(renderUrl(tpl.url))
     openInsertOverlay()
@@ -802,66 +842,106 @@ async function reuseSavedDecor(tpl) {
   }
 }
 
-// Écran « Mes templates sauvegardés » : plus de séparation Photopea/IA — on regroupe
-// UNIQUEMENT par pièce. Les Photopea sont rangés par leur dossier-catégorie, les décors IA
-// par la pièce choisie au dropdown (mémorisée). Un petit signe haut-droit distingue PS / IA.
-function renderSavedTemplates() {
-  const wrap = $('#savedGroups')
-  if (!wrap) return
-  const curOri = state.orientation
-  wrap.innerHTML = ''
-  // Unifie favoris Photopea + décors IA, filtrés sur le type produit courant.
-  const entries = []
-  for (const t of state.saved.photopea.filter((t) => !t.type || t.type === state.productType)) {
-    entries.push({ kind: 'photopea', room: t.category || 'Autre', ori: (t.orientations && t.orientations[0]) || null, data: t })
-  }
-  for (const t of state.saved.ai.filter((t) => !t.product || PRODUCT_TO_TYPE[t.product] === state.productType)) {
-    entries.push({ kind: 'ai', room: roomLabelOf(t.roomType), ori: t.orientation || null, data: t })
-  }
-  $('#savedEmpty').classList.toggle('hidden', entries.length > 0)
-  // Regroupe par pièce ; « Autre » en dernier, le reste par ordre alphabétique FR.
-  const groups = {}
-  for (const e of entries) (groups[e.room] = groups[e.room] || []).push(e)
-  const rooms = Object.keys(groups).sort((a, b) => (a === 'Autre') - (b === 'Autre') || a.localeCompare(b, 'fr'))
-  for (const room of rooms) {
-    const title = document.createElement('h3')
-    title.className = 'saved-group-title'
-    title.textContent = room
-    wrap.appendChild(title)
-    const grid = document.createElement('div')
-    grid.className = 'mockup-grid'
-    for (const e of groups[room]) grid.appendChild(buildSavedCell(e, curOri))
-    wrap.appendChild(grid)
+// Bascule le favori d'un décor IA (favori = inséré automatiquement, en lot, quand l'image est prête).
+async function toggleAiFavorite(t) {
+  try {
+    const r = await fetch(RENDER + '/api/saved-templates/ai/' + t.id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ favorite: !t.favorite }),
+    })
+    if (!r.ok) throw new Error('échec')
+    toast(!t.favorite ? 'Ajouté aux favoris ★' : 'Retiré des favoris', 'ok')
+    await loadSavedTemplates()
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'err')
   }
 }
 
-// Construit une cellule de template sauvegardé (favori Photopea OU décor IA).
-// Clic = réutiliser ; appui long = menu (Supprimer / Retirer des favoris).
-function buildSavedCell(e, curOri) {
-  const t = e.data
-  const ori = e.ori
-  const compatible = !curOri || !ori || ori === curOri
-  const cell = document.createElement('div')
-  cell.className = 'mockup-cell saved-cell' + (compatible ? '' : ' incompatible')
-  const kindSign = e.kind === 'ai'
-    ? '<span class="mc-kind ai" title="Décor généré par IA">IA</span>'
-    : '<span class="mc-kind pp" title="Mockup Photopea">PS</span>'
-  const imgUrl = e.kind === 'ai' ? renderUrl(t.url) : t.preview ? renderUrl(t.preview) : null
-  const label = e.kind === 'ai' ? t.theme || 'Décor IA' : t.subName || 'Template'
-  cell.innerHTML = `${kindSign}${ori ? `<span class="mc-ori">${escapeHtml(labelOri(ori))}</span>` : ''}${imgUrl ? `<img src="${imgUrl}" loading="lazy" alt="">` : `<div class="mc-noimg"></div>`}<div class="mc-label">${escapeHtml(label)}</div>`
-  cell.addEventListener('click', () => {
-    if (cell._suppressClick) { cell._suppressClick = false; return } // clic « fantôme » après long-press
-    if (e.kind === 'ai') return reuseSavedDecor(t)
-    if (!state.imageDataUrl) return toast('Choisis une image d\'abord', 'err')
-    if (!compatible) return toast(`Ce template est en ${labelOri(ori)} — change d'orientation d'image`, 'err')
-    renderWithPsd({ psd: t.psd, context: t.context || t.subName, label: t.subName || 'Template' }, cell)
-  })
-  attachLongPress(cell, () =>
-    e.kind === 'ai'
-      ? [{ label: '🗑 Supprimer', danger: true, onClick: () => deleteSaved('ai', t.id) }]
-      : [{ label: '🗑 Retirer des favoris', danger: true, onClick: () => deleteSaved('photopea', t.id) }]
+/* ---------- Favoris automatiques ---------- */
+// Dès que l'image est au bon format, on applique l'œuvre à TOUS les favoris, en un lot, une
+// seule fois par œuvre : mockups Photopea favoris -> rendu ; décors IA favoris -> insertion.
+function maybeRunFavorites() {
+  if (!state.imageDataUrl || state.needsResize || !state.orientation) return
+  if (state.lastBatchImage === state.imageDataUrl) return // déjà appliqué pour cette œuvre
+  runFavoritesBatch()
+}
+async function runFavoritesBatch() {
+  // Jeton de session : un ré-upload / changement de type bumpe state.batchToken (via clearResults
+  // ou ici), ce qui PÉRIME ce lot -> ses rendus restants ne sont ni écrits ni comptés. On capture
+  // aussi l'œuvre/orientation/produit UNE fois, pour ne jamais relire un state qui a changé.
+  const token = (state.batchToken = {})
+  const image = state.imageDataUrl,
+    ori = state.orientation,
+    product = productOf(state.productType),
+    productType = state.productType
+  const ppFavs = state.saved.photopea.filter(
+    (t) => (!t.type || t.type === productType) && (!(t.orientations && t.orientations[0]) || t.orientations[0] === ori)
   )
-  return cell
+  const aiFavs = state.saved.ai.filter(
+    (t) => t.favorite && (!t.product || PRODUCT_TO_TYPE[t.product] === productType) && (!t.orientation || t.orientation === ori)
+  )
+  const total = ppFavs.length + aiFavs.length
+  if (!total) return
+  state.lastBatchImage = image
+  const hint = $('#mockupsHint')
+  let done = 0,
+    fails = 0
+  const stale = () => token !== state.batchToken
+  const tick = () => { if (hint && !stale()) hint.textContent = `Application de vos favoris… ${done}/${total}` }
+  const addResult = (res) => {
+    if (stale()) return false // lot périmé -> on n'écrit pas dans la session courante
+    state.results.push(res)
+    renderResults()
+    refreshAction()
+    return true
+  }
+  tick()
+  for (const pp of ppFavs) {
+    try {
+      const res = await renderFavoritePhotopea(pp, image)
+      if (!addResult(res)) return
+    } catch { fails++ }
+    if (stale()) return
+    done++
+    tick()
+  }
+  for (const ai of aiFavs) {
+    try {
+      const res = await insertFavoriteAi(ai, image, ori, product)
+      if (!addResult(res)) return
+    } catch { fails++ }
+    if (stale()) return
+    done++
+    tick()
+  }
+  renderMockups() // restaure le hint normal
+  toast(
+    fails ? `${total - fails}/${total} favori(s) appliqué(s) · ${fails} échec(s)` : `${total} favori(s) appliqué(s) ✓`,
+    fails ? 'err' : 'ok'
+  )
+}
+// Génèrent/insèrent SANS toucher à state.results : c'est le lot qui décide d'écrire (selon le jeton).
+async function renderFavoritePhotopea(pp, image) {
+  const r = await fetch(RENDER + '/api/render', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ psd: pp.psd, image, mockupContext: pp.context || pp.subName }),
+  })
+  const data = await r.json()
+  if (!data.success) throw new Error(data.error || 'échec du rendu')
+  return {
+    id: 'r' + Date.now() + Math.random().toString(36).slice(2, 5),
+    path: data.url, url: renderUrl(data.url), context: data.mockupContext, label: pp.subName || 'Mockup',
+  }
+}
+async function insertFavoriteAi(ai, image, ori, product) {
+  const decor = await urlToDataUrl(renderUrl(ai.url))
+  const img = await callInsertJob({ decor, artwork: image, target: ori, product, fidelity: 'standard' })
+  return {
+    id: 'ins' + Date.now() + Math.random().toString(36).slice(2, 5),
+    path: null, url: img, context: 'Décor sur-mesure (IA)', label: 'Décor IA',
+  }
 }
 
 /* ---------- 4. Résultats + drag-drop UNIFIÉ (pointer events : souris === tactile) ---------- */
@@ -888,7 +968,7 @@ function removeResult(id) {
   state.results = state.results.filter((r) => r.id !== id)
   renderResults()
   refreshAction()
-  if (res) fetch(RENDER + '/api/upload/' + res.url.split('/').pop(), { method: 'DELETE' }).catch(() => {})
+  if (res && res.path) fetch(RENDER + '/api/upload/' + res.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
 }
 function reorder(fromId, toId) {
   if (fromId === toId) return
@@ -900,51 +980,69 @@ function reorder(fromId, toId) {
   renderResults()
 }
 
-// Un SEUL système pour souris ET tactile, via pointer events + listeners au DOCUMENT.
-// Distingue clic (→ lightbox) et glissement (→ réorganisation) selon la distance parcourue.
-// Pas de setPointerCapture (qui empêcherait elementFromPoint de voir les autres cellules).
-let drag = null // { id, cell, res, startX, startY, moved }
+// Réorganisation par APPUI LONG puis glisser (sinon un mouvement = scroll de page).
+// pointer events (souris === tactile). Tap simple = agrandir. Tant que l'appui long n'a pas
+// « armé » le glisser, tout mouvement annule le geste et laisse le navigateur scroller.
+let drag = null // { id, cell, res, startX, startY, armed, moved, timer }
 
 function onDragMove(e) {
   if (!drag) return
-  const x = e.clientX,
-    y = e.clientY
-  const dist = Math.abs(x - drag.startX) + Math.abs(y - drag.startY)
-  if (!drag.moved && dist < 8) return
+  const dx = e.clientX - drag.startX,
+    dy = e.clientY - drag.startY
+  if (!drag.armed) {
+    // pas encore armé : un déplacement = intention de scroll -> on abandonne le glisser
+    if (Math.abs(dx) + Math.abs(dy) > 10) cancelDrag()
+    return
+  }
   drag.moved = true
-  e.preventDefault() // empêche le scroll pendant le glissement (tactile)
+  e.preventDefault() // armé : on prend la main sur le geste (pas de scroll)
   drag.cell.classList.add('dragging')
-  const el = document.elementFromPoint(x, y)
+  const el = document.elementFromPoint(e.clientX, e.clientY)
   const target = el && el.closest('.result-cell')
   $$('.result-cell').forEach((c) => c.classList.toggle('over', c === target && c !== drag.cell))
 }
-function onDragEnd(e) {
+function endDrag(e) {
   if (!drag) return
-  document.removeEventListener('pointermove', onDragMove)
-  document.removeEventListener('pointerup', onDragEnd)
-  document.removeEventListener('pointercancel', onDragEnd)
   const cur = drag
-  drag = null
+  teardownDrag()
   $$('.result-cell').forEach((c) => c.classList.remove('over'))
-  cur.cell.classList.remove('dragging')
-  if (cur.moved) {
+  cur.cell.classList.remove('dragging', 'drag-armed')
+  if (cur.armed && cur.moved) {
     const el = document.elementFromPoint(e.clientX, e.clientY)
     const target = el && el.closest('.result-cell')
     if (target && target.dataset.id !== cur.id) reorder(cur.id, target.dataset.id)
-  } else {
-    // pas de glissement = simple tap/clic -> agrandir (marche souris ET tactile,
-    // y compris si le navigateur émet pointercancel au lieu de pointerup sur mobile)
-    openLightbox(cur.res.url)
+  } else if (!cur.armed) {
+    openLightbox(cur.res.url) // tap simple (pas d'appui long) -> agrandir
   }
+  // armé sans déplacement -> no-op (appui long relâché sur place)
+}
+function cancelDrag() {
+  if (!drag) return
+  drag.cell.classList.remove('dragging', 'drag-armed')
+  $$('.result-cell').forEach((c) => c.classList.remove('over')) // pas de surbrillance figée après un pointercancel
+  teardownDrag()
+}
+function teardownDrag() {
+  if (drag && drag.timer) clearTimeout(drag.timer)
+  document.removeEventListener('pointermove', onDragMove)
+  document.removeEventListener('pointerup', endDrag)
+  document.removeEventListener('pointercancel', cancelDrag)
+  drag = null
 }
 function attachDrag(cell, res) {
   cell.addEventListener('pointerdown', (e) => {
-    if (e.button !== undefined && e.button !== 0) return // clic gauche / tactile
-    if (e.target.closest('.del')) return // pas sur supprimer
-    drag = { id: cell.dataset.id, cell, res, startX: e.clientX, startY: e.clientY, moved: false }
+    if (e.button !== undefined && e.button !== 0) return // clic gauche / tactile uniquement
+    if (e.target.closest('.del')) return // pas sur le bouton supprimer
+    drag = { id: cell.dataset.id, cell, res, startX: e.clientX, startY: e.clientY, armed: false, moved: false, timer: null }
+    drag.timer = setTimeout(() => {
+      if (!drag) return
+      drag.armed = true // appui long maintenu sur place -> le glisser est prêt
+      cell.classList.add('drag-armed')
+      if (navigator.vibrate) navigator.vibrate(15) // retour haptique
+    }, 350)
     document.addEventListener('pointermove', onDragMove, { passive: false })
-    document.addEventListener('pointerup', onDragEnd)
-    document.addEventListener('pointercancel', onDragEnd)
+    document.addEventListener('pointerup', endDrag)
+    document.addEventListener('pointercancel', cancelDrag)
   })
 }
 

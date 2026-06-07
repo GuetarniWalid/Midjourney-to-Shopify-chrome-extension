@@ -275,6 +275,23 @@ app.post('/api/saved-templates/ai', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
+// Bascule le flag "favori" d'un décor IA. Favori = l'œuvre y est insérée automatiquement
+// (en lot) dès qu'elle est au bon format, au même titre que les mockups Photopea favoris.
+app.patch('/api/saved-templates/ai/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const favorite = !!(req.body && req.body.favorite);
+    const updated = await mutateSaved((db) => {
+      const rec = db.ai.find((t) => t.id === id);
+      if (!rec) return null;
+      rec.favorite = favorite;
+      return rec;
+    });
+    if (!updated) return res.status(404).json({ success: false, error: 'introuvable' });
+    res.json({ success: true, favorite: updated.favorite });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // Supprime un template sauvegardé (et le fichier image pour les décors IA).
 app.delete('/api/saved-templates/:kind/:id', async (req, res) => {
   try {
