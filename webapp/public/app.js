@@ -498,6 +498,7 @@ $$('#productType .seg-btn').forEach((btn) =>
 
 // Vide la galerie de rendus (et supprime les fichiers serveur correspondants)
 function clearResults() {
+  state.publishKey = null // nouvelle session => nouvelle clé d'idempotence à la prochaine publication
   state.batchToken = {} // périme tout lot de favoris en cours -> ses écritures seront ignorées
   // seuls les rendus Photopea ont un fichier temp serveur (res.path) ; les rendus IA sont des data URI
   for (const r of state.results)
@@ -1388,11 +1389,20 @@ $('#publishBtn').addEventListener('click', async () => {
       })
       if (i === 0) imgs.push({ base64Image: state.imageDataUrl, type: 'original' })
     }
+    // Clé d'idempotence : stable tant qu'on n'a pas publié avec succès, donc un
+    // re-clic après un timeout (524) renvoie le produit déjà créé au lieu d'un doublon.
+    if (!state.publishKey) {
+      state.publishKey =
+        self.crypto && crypto.randomUUID
+          ? crypto.randomUUID()
+          : 'pk_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+    }
     const payload = {
       images: imgs,
       ratio: state.orientation,
       productType: TYPE_MAP[state.productType],
       parentCollection: { id: state.collection.id, title: state.collection.title },
+      idempotencyKey: state.publishKey,
     }
     progress.step('Création du produit sur Shopify… (cela peut prendre jusqu’à 1 min)')
     // timeout de sécurité (le backend peut être long : IA + Shopify)
@@ -1423,6 +1433,12 @@ $('#publishBtn').addEventListener('click', async () => {
         (data.errors ? JSON.stringify(data.errors) : '') ||
         'Erreur serveur (HTTP ' + r.status + ')'
       throw new Error(detail)
+    }
+    if (data.pending) {
+      // Une publication avec cette même clé est déjà en cours côté serveur :
+      // on n'en relance pas une autre (évite les doublons).
+      progress.done('⏳ Publication déjà en cours. Vérifie ta boutique dans une minute (ne republie pas).')
+      return
     }
     const link = data.data && data.data.link
     progress.done('Produit publié ✓', link)
