@@ -8,6 +8,10 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)]
 const CFG = window.PUBLISHER_CONFIG || {}
 const RENDER = (CFG.renderBase || '').replace(/\/$/, '') // ex: https://xxx.trycloudflare.com ; '' = même origine (test local)
 const API = (CFG.apiBase || '').replace(/\/$/, '') // ex: '' (backend sert la page) ou http://localhost:3333
+// Mode de l'app : 'create' (publication classique) ou 'reimage' (refaire les images d'un produit
+// existant). Injecté par le backend en prod, ou via ?mode=reimage en dev (render server PC).
+const MODE = CFG.mode || new URLSearchParams(location.search).get('mode') || 'create'
+const IS_REIMAGE = MODE === 'reimage'
 // helper pour préfixer une URL relative (/uploads/.. , /mockups/..) par le moteur de rendu
 const renderUrl = (p) => RENDER + p
 // type produit (UI en FR) -> enum backend
@@ -36,6 +40,7 @@ const state = {
   favPsds: new Set(), // chemins PSD favoris (pour l'état des étoiles)
   lastBatchImage: null, // dernière œuvre pour laquelle les favoris ont été appliqués auto
   batchToken: null, // jeton du lot de favoris courant (sert à annuler un lot devenu périmé)
+  product: null, // mode reimage : contexte du produit choisi {id, title, orientation, productType, images, hasVideo}
 }
 
 /* ---------- Toast ---------- */
@@ -78,6 +83,7 @@ dropzone.addEventListener('drop', (e) => {
 })
 
 function loadImageFile(file) {
+  if (IS_REIMAGE && !state.product) return toast("Choisissez d'abord le produit à refaire", 'err')
   if (!file.type.startsWith('image/')) return toast('Fichier non image', 'err')
   const reader = new FileReader()
   reader.onload = () => {
@@ -118,6 +124,14 @@ function detectOrientation(w, h) {
     ori = 'portrait'; label = 'Portrait'
   } else {
     ori = 'landscape'; label = 'Paysage'
+  }
+  // mode reimage : l'orientation du produit est IMPOSÉE — l'image devra s'y conformer (retaillage)
+  if (IS_REIMAGE && state.product && state.product.orientation) {
+    const locked = state.product.orientation
+    if (ori !== locked)
+      toast(`L'image semble ${labelOri(ori)}, le produit est ${labelOri(locked)} — le retaillage convertira au bon format.`)
+    ori = locked
+    label = { portrait: 'Portrait', landscape: 'Paysage', square: 'Carré' }[locked]
   }
   // déjà au bon format ? tolérance relative 3% vs le ratio cible de sa classe
   const target = TARGET_RATIO[ori]
@@ -488,8 +502,10 @@ $$('#productType .seg-btn').forEach((btn) =>
     btn.classList.add('active')
     state.productType = btn.dataset.type
     clearResults()
-    clearCollection()
-    loadCollections()
+    if (!IS_REIMAGE) {
+      clearCollection()
+      loadCollections() // en mode reimage il n'y a pas de collection à choisir
+    }
     loadTemplates() // recharge le catalogue + re-rend les décors IA du nouveau type (inclut renderMockups)
     state.lastBatchImage = null // nouveau type = nouveau jeu de favoris -> ré-application auto
     maybeRunFavorites()
@@ -566,6 +582,255 @@ collChosen.addEventListener('click', (e) => {
 document.addEventListener('click', (e) => {
   if (!e.target.closest('.combo')) collList.classList.add('hidden')
 })
+
+/* ---------- 2b. Mode « reimage » : refaire les images d'un produit existant ---------- */
+// La carte « Produit à refaire » n'existe à l'écran qu'en mode reimage (cachée en mode create).
+// Le produit choisi IMPOSE son orientation et son type ; ses images actuelles sont montrées en
+// lecture seule (elles seront toutes remplacées par les nouveaux rendus à la publication).
+const prodSearch = $('#productSearch'),
+  prodList = $('#productList'),
+  prodChosen = $('#productChosen')
+// type backend ('painting'|'poster'|'tapestry') -> type UI ('toile'|'poster'|'tapisserie')
+const BACKEND_TYPE_TO_UI = { painting: 'toile', poster: 'poster', tapestry: 'tapisserie' }
+const TYPE_LABELS = { toile: 'Toile', poster: 'Poster', tapisserie: 'Tapisserie' }
+const ORI_LABELS = { portrait: 'Portrait', landscape: 'Paysage', square: 'Carré' }
+
+let prodSearchT = null // timer du debounce de la recherche produit
+let prodResults = [] // derniers produits affichés dans la liste (pour retrouver l'objet au clic)
+let prodSelectToken = null // identité du chargement de contexte en cours (anti-réponse périmée)
+
+// Réécrit l'UI pour le mode reimage : carte produit visible, numéros des cartes, header, libellés.
+function initReimageUi() {
+  $('.brand em').textContent = 'Refaire les images'
+  $('#productCard').classList.remove('hidden')
+  $('#uploadCard .card-title').textContent = '2 · Votre image'
+  $('#mockupsCard .card-title').textContent = '3 · Mockups'
+  $('#resultsCard .card-title').textContent = '4 · Vos rendus'
+  // pas de collection en mode reimage ; le type produit est auto -> la carte paramètres ne
+  // réapparaît (segment seul) que si le type du produit est indéterminable (choix manuel)
+  $('#collectionField').classList.add('hidden')
+  $('#paramsCard').classList.add('hidden')
+  $('#paramsCard .card-title').textContent = 'Type de produit'
+  $('#publishBtn').textContent = 'Remplacer les images'
+  updateDropzoneLock()
+}
+
+// Zone d'upload inactive tant qu'aucun produit n'est choisi (mode reimage uniquement).
+function updateDropzoneLock() {
+  const locked = IS_REIMAGE && !state.product
+  dropzone.classList.toggle('locked', locked)
+  const b = $('#dzInner b')
+  if (b) b.textContent = locked ? "Choisissez d'abord le produit à refaire" : 'Touchez pour choisir une image'
+}
+
+async function searchProducts(term) {
+  try {
+    // Accept JSON : en session expirée, Adonis répond 401 JSON au lieu d'un redirect HTML
+    const r = await fetch(API + '/api/products/search' + (term ? '?q=' + encodeURIComponent(term) : ''), {
+      headers: { Accept: 'application/json' },
+    })
+    const data = await safeJson(r)
+    return (data && data.success && data.data && data.data.products) || []
+  } catch {
+    return []
+  }
+}
+
+// Liste de résultats : vignette + titre + badge « brouillon » pour les produits non publiés.
+function renderProductList(list) {
+  prodResults = list
+  prodList.innerHTML =
+    list
+      .map(
+        (p) =>
+          `<div class="combo-item product-item" data-id="${escapeHtml(p.id)}">` +
+          (p.image
+            ? `<img class="pi-thumb" src="${escapeHtml(p.image)}" loading="lazy" alt="">`
+            : '<span class="pi-thumb pi-noimg"></span>') +
+          `<span class="pi-title">${escapeHtml(p.title)}</span>` +
+          (p.status === 'DRAFT' ? '<span class="pi-badge">brouillon</span>' : '') +
+          '</div>'
+      )
+      .join('') || `<div class="combo-item" style="color:var(--muted)">Aucun produit</div>`
+  prodList.classList.remove('hidden')
+}
+
+// Pastille du produit choisi : titre + type/orientation imposés (ex « Toile · Portrait »).
+function renderProductChosen() {
+  const p = state.product
+  if (!p) return
+  const bits = []
+  const uiType = BACKEND_TYPE_TO_UI[p.productType]
+  if (uiType) bits.push(TYPE_LABELS[uiType])
+  if (p.orientation) bits.push(ORI_LABELS[p.orientation])
+  prodChosen.innerHTML =
+    `<span>${escapeHtml(p.title)}</span>` +
+    (bits.length ? `<span class="chosen-info">${bits.join(' · ')}</span>` : '') +
+    `<span class="x">✕</span>`
+  prodChosen.classList.remove('hidden')
+}
+
+// Rangée (lecture seule) des images actuelles du produit + note « vidéo conservée ».
+function renderProductImages(ctx) {
+  const wrap = $('#productImagesWrap'),
+    row = $('#productImages'),
+    note = $('#productVideoNote')
+  const imgs = (ctx && ctx.images) || []
+  row.innerHTML = imgs
+    .map((im) => `<img class="current-thumb" src="${escapeHtml(im.url)}" alt="${escapeHtml(im.alt || '')}" loading="lazy">`)
+    .join('')
+  wrap.classList.toggle('hidden', !imgs.length)
+  note.classList.toggle('hidden', !(ctx && ctx.hasVideo))
+}
+
+function clearProduct() {
+  state.product = null
+  state.publishKey = null // changement/désélection de produit => nouvelle clé d'idempotence
+  prodSelectToken = {} // périme un chargement de contexte encore en vol
+  prodChosen.classList.add('hidden')
+  prodChosen.innerHTML = ''
+  prodSearch.value = ''
+  prodSearch.classList.remove('hidden')
+  prodList.classList.add('hidden')
+  renderProductImages(null)
+  $('#paramsCard').classList.add('hidden')
+  updateDropzoneLock()
+  refreshAction()
+}
+
+// Sélection : pastille immédiate puis chargement du contexte (orientation, type, images, vidéo).
+async function selectProduct(p) {
+  const token = (prodSelectToken = {})
+  prodList.classList.add('hidden')
+  prodSearch.classList.add('hidden')
+  prodChosen.innerHTML = `<span>${escapeHtml(p.title)}</span><span class="chosen-info">chargement…</span><span class="x">✕</span>`
+  prodChosen.classList.remove('hidden')
+  let ctx
+  try {
+    const r = await fetch(API + '/api/products/reimage-context?id=' + encodeURIComponent(p.id), {
+      headers: { Accept: 'application/json' },
+    })
+    const data = await safeJson(r)
+    if (!r.ok || !data.success || !data.data)
+      throw new Error(data.message || data.error || 'contexte indisponible (' + r.status + ')')
+    ctx = data.data
+  } catch (e) {
+    if (token !== prodSelectToken) return // désélectionné / re-sélectionné entre-temps
+    clearProduct()
+    return toast('Produit : ' + e.message, 'err')
+  }
+  if (token !== prodSelectToken) return
+  applyReimageContext(ctx)
+}
+
+// Applique le contexte du produit : verrouillage type/orientation + reset intelligent (D7).
+function applyReimageContext(ctx) {
+  const prevOri = state.orientation // orientation de la session (image éventuellement déjà chargée)
+  state.product = ctx
+  state.publishKey = null // tout changement de produit => nouvelle clé d'idempotence
+
+  // type de produit auto : segment caché si le type est connu, sinon choix manuel
+  const uiType = BACKEND_TYPE_TO_UI[ctx.productType] || null
+  if (uiType) {
+    $('#paramsCard').classList.add('hidden')
+    if (uiType !== state.productType) {
+      // même bascule que le segment Toile/Poster/Tapisserie, SANS recharger les collections
+      $$('#productType .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.type === uiType))
+      state.productType = uiType
+      state.lastBatchImage = null
+      state.batchToken = {} // périme un lot de favoris encore en vol (il rendait l'ancien type)
+      loadTemplates() // recharge le catalogue du nouveau type (inclut renderMockups)
+    }
+  } else {
+    $('#paramsCard').classList.remove('hidden')
+  }
+
+  renderProductChosen()
+  renderProductImages(ctx)
+  updateDropzoneLock()
+
+  // orientation indéterminable (produit ancien) -> comportement actuel : détection auto (D6)
+  if (!ctx.orientation)
+    toast("Orientation du produit indéterminable — détection automatique depuis l'image.")
+
+  // image déjà chargée : on ré-évalue orientation/format contre le nouveau verrou.
+  // Toast « produit changé » émis AVANT detectOrientation : l'avertissement de
+  // conversion de format (le plus important) doit rester le dernier visible.
+  if (state.imageDataUrl) {
+    const r = state.sourceRatio
+    const naturalOri = r >= 0.9 && r <= 1.1 ? 'square' : r < 0.9 ? 'portrait' : 'landscape'
+    const nextOri = ctx.orientation || naturalOri
+    if (nextOri === prevOri) {
+      if (state.results.length)
+        toast('Produit changé — vos rendus sont conservés (même orientation).', 'ok')
+    } else {
+      const hadResults = state.results.length > 0
+      clearResults() // orientation différente : les rendus existants ne sont plus valables
+      toast(
+        `Produit changé — orientation ${labelOri(prevOri)} → ${labelOri(nextOri)}` +
+          (hadResults ? ' : rendus effacés.' : '.')
+      )
+    }
+    detectOrientation(state.sourceRatio, 1) // seul le ratio compte (le verrou s'applique dedans)
+    renderMockups()
+  }
+  refreshAction()
+}
+
+// Reset COMPLET de la session reimage après un remplacement réussi (D10).
+function resetReimageSession() {
+  clearResults()
+  state.imageDataUrl = null
+  state.orientation = null
+  state.sourceRatio = null
+  state.needsResize = false
+  state.lastBatchImage = null
+  state.decor = null
+  fileInput.value = ''
+  sourcePreview.src = ''
+  sourcePreview.classList.add('hidden')
+  dzInner.classList.remove('hidden')
+  changeBtn.classList.add('hidden')
+  $('#orientationBadge').classList.add('hidden')
+  updateRatioUI()
+  clearProduct() // produit désélectionné (re-verrouille la zone d'upload) + refreshAction
+  renderMockups()
+}
+
+if (IS_REIMAGE && prodSearch) {
+  // recherche débouncée (300 ms) ; champ vide = les 20 produits les plus récemment modifiés
+  prodSearch.addEventListener('input', () => {
+    clearTimeout(prodSearchT)
+    const term = prodSearch.value.trim()
+    prodSearchT = setTimeout(async () => {
+      const list = await searchProducts(term)
+      // réponse périmée (terme modifié / produit déjà choisi entre-temps) -> on l'ignore
+      if (prodSearch.value.trim() !== term || prodSearch.classList.contains('hidden')) return
+      renderProductList(list)
+    }, 300)
+  })
+  prodSearch.addEventListener('focus', () => prodSearch.dispatchEvent(new Event('input')))
+  prodList.addEventListener('click', (e) => {
+    const item = e.target.closest('.combo-item')
+    if (!item || !item.dataset.id) return
+    const p = prodResults.find((x) => String(x.id) === item.dataset.id)
+    if (p) selectProduct(p)
+  })
+  prodChosen.addEventListener('click', (e) => {
+    if (e.target.classList.contains('x')) clearProduct()
+  })
+  // fermeture PAR INSTANCE : un clic hors du combo produit ferme SA liste (sans toucher aux autres)
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#productCard .combo')) prodList.classList.add('hidden')
+  })
+  // zone d'upload verrouillée tant qu'aucun produit n'est choisi (le label n'ouvre pas le sélecteur)
+  dropzone.addEventListener('click', (e) => {
+    if (!state.product) {
+      e.preventDefault()
+      toast("Choisissez d'abord le produit à refaire", 'err')
+    }
+  })
+}
 
 /* ---------- 3. Mockups (filtrés par orientation) ---------- */
 async function loadTemplates() {
@@ -1344,6 +1609,7 @@ $('#progressClose').addEventListener('click', () => progress.hide())
 
 /* ---------- Publication ---------- */
 function refreshAction() {
+  if (IS_REIMAGE) return refreshActionReimage()
   const info = $('#actionInfo'),
     btn = $('#publishBtn')
   const n = state.results.length
@@ -1361,11 +1627,35 @@ function refreshAction() {
   btn.disabled = !(state.collection && n > 0 && state.imageDataUrl)
 }
 
+// Variante reimage : actif ssi produit choisi + image au bon format + au moins 1 rendu (D9).
+function refreshActionReimage() {
+  const info = $('#actionInfo'),
+    btn = $('#publishBtn')
+  const n = state.results.length
+  if (!state.product) {
+    info.textContent = 'Choisissez le produit à refaire'
+    btn.disabled = true
+    return
+  }
+  if (state.needsResize) {
+    info.textContent = "⚠️ Retaille l'image au bon format pour publier"
+    btn.disabled = true
+    return
+  }
+  const parts = []
+  if (state.orientation) parts.push(labelOri(state.orientation))
+  parts.push(state.product.title)
+  parts.push(`${n} rendu${n > 1 ? 's' : ''}`)
+  info.textContent = parts.join(' · ')
+  btn.disabled = !(n > 0 && state.imageDataUrl)
+}
+
 $('#publishBtn').addEventListener('click', async () => {
   const btn = $('#publishBtn')
   if (btn.disabled) return
   btn.disabled = true
   progress.show('Préparation des images…')
+  if (IS_REIMAGE) $('#progressTitle').textContent = 'Remplacement en cours…'
   try {
     // ordre: [mockup1, original, mockup2, ...]
     const imgs = []
@@ -1397,25 +1687,45 @@ $('#publishBtn').addEventListener('click', async () => {
           ? crypto.randomUUID()
           : 'pk_' + Date.now() + '_' + Math.random().toString(36).slice(2)
     }
-    const payload = {
-      images: imgs,
-      ratio: state.orientation,
-      productType: TYPE_MAP[state.productType],
-      parentCollection: { id: state.collection.id, title: state.collection.title },
-      idempotencyKey: state.publishKey,
-    }
-    progress.step('Création du produit sur Shopify… (cela peut prendre jusqu’à 1 min)')
+    // mode reimage : on remplace les images d'un produit existant (mêmes images, autre cible)
+    const payload = IS_REIMAGE
+      ? {
+          productId: state.product.id,
+          ratio: state.orientation,
+          images: imgs,
+          idempotencyKey: state.publishKey,
+          // produit sans metafield artwork.type : on transmet le choix manuel du segment
+          ...(state.product.productType ? {} : { productType: TYPE_MAP[state.productType] }),
+        }
+      : {
+          images: imgs,
+          ratio: state.orientation,
+          productType: TYPE_MAP[state.productType],
+          parentCollection: { id: state.collection.id, title: state.collection.title },
+          idempotencyKey: state.publishKey,
+        }
+    progress.step(
+      IS_REIMAGE
+        ? 'Remplacement des images sur Shopify… (cela peut prendre jusqu’à 1 min)'
+        : 'Création du produit sur Shopify… (cela peut prendre jusqu’à 1 min)'
+    )
     // timeout de sécurité (le backend peut être long : IA + Shopify)
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), 180000)
     let r
     try {
-      r = await fetch(API + '/api/shopify-product-publisher/publish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      })
+      r = await fetch(
+        API + (IS_REIMAGE ? '/api/shopify-product-publisher/replace-images' : '/api/shopify-product-publisher/publish'),
+        {
+          method: 'POST',
+          // reimage : Accept JSON pour que l'auth expirée réponde 401 JSON (pas un redirect HTML)
+          headers: IS_REIMAGE
+            ? { 'Content-Type': 'application/json', Accept: 'application/json' }
+            : { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: ctrl.signal,
+        }
+      )
     } catch (netErr) {
       throw new Error(
         netErr.name === 'AbortError'
@@ -1426,7 +1736,9 @@ $('#publishBtn').addEventListener('click', async () => {
       clearTimeout(timer)
     }
     const data = await r.json().catch(() => ({}))
-    if (!r.ok || data.success === false) {
+    // success !== true (et pas === false) : une réponse HTML (ex. redirect /login si
+    // session expirée) donne data={} et ne doit PAS passer pour un succès.
+    if (!r.ok || data.success !== true) {
       const detail =
         data.message ||
         data.error ||
@@ -1437,13 +1749,23 @@ $('#publishBtn').addEventListener('click', async () => {
     if (data.pending) {
       // Une publication avec cette même clé est déjà en cours côté serveur :
       // on n'en relance pas une autre (évite les doublons).
-      progress.done('⏳ Publication déjà en cours. Vérifie ta boutique dans une minute (ne republie pas).')
+      progress.done(
+        IS_REIMAGE
+          ? '⏳ Remplacement déjà en cours. Vérifie ta boutique dans une minute (ne relance pas).'
+          : '⏳ Publication déjà en cours. Vérifie ta boutique dans une minute (ne republie pas).'
+      )
       return
     }
     const link = data.data && data.data.link
-    progress.done('Produit publié ✓', link)
-    // on retire les rendus publiés (nouvelle session propre)
-    clearResults()
+    if (IS_REIMAGE) {
+      progress.done('Images remplacées ✓', link)
+      $('#progressMsg').textContent = 'Le nettoyage des anciennes images se termine en arrière-plan (~1 min).'
+      resetReimageSession() // session entièrement réinitialisée (produit, image, rendus, clé)
+    } else {
+      progress.done('Produit publié ✓', link)
+      // on retire les rendus publiés (nouvelle session propre)
+      clearResults()
+    }
   } catch (e) {
     progress.fail(e.message)
   } finally {
@@ -1460,8 +1782,9 @@ function escapeHtml(s) {
 }
 
 ;(async function init() {
+  if (IS_REIMAGE) initReimageUi() // réordonne/renomme les cartes + verrouille l'upload
   await loadTemplates()
   loadSavedTemplates()
-  loadCollections()
+  if (!IS_REIMAGE) loadCollections() // pas de collection à choisir en mode reimage
   refreshAction()
 })()

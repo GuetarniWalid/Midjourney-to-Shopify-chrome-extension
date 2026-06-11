@@ -24,6 +24,24 @@
 
   <main class="content">
 
+    <!-- 0. Produit à refaire (mode reimage uniquement — révélé par app.js) -->
+    <section class="card hidden" id="productCard">
+      <h2 class="card-title">1 · Produit à refaire</h2>
+      <div class="field">
+        <label>Produit existant</label>
+        <div class="combo">
+          <input type="text" id="productSearch" placeholder="Rechercher un produit…" autocomplete="off">
+          <div id="productList" class="combo-list hidden"></div>
+        </div>
+        <div id="productChosen" class="chosen hidden"></div>
+      </div>
+      <div id="productImagesWrap" class="current-images hidden">
+        <span class="current-images-label">Images actuelles (seront remplacées)</span>
+        <div id="productImages" class="current-images-row"></div>
+      </div>
+      <p id="productVideoNote" class="video-note hidden">🎬 La vidéo du produit sera conservée</p>
+    </section>
+
     <!-- 1. Upload -->
     <section class="card" id="uploadCard">
       <h2 class="card-title">1 · Votre image</h2>
@@ -55,7 +73,7 @@
         <button class="seg-btn" data-type="tapisserie">Tapisserie</button>
       </div>
 
-      <div class="field">
+      <div class="field" id="collectionField">
         <label>Collection parente</label>
         <div class="combo">
           <input type="text" id="collectionSearch" placeholder="Rechercher une collection…" autocomplete="off">
