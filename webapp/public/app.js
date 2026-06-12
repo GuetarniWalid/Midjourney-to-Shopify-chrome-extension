@@ -240,7 +240,7 @@ function showResizeLoading(msg) {
 async function runResizePreview() {
   $('#resizeOverlay').classList.remove('hidden')
   $('#resizeBefore').src = state.imageDataUrl
-  showResizeLoading('Génération de l\'aperçu… (~20-30s)')
+  showResizeLoading('Génération de l\'aperçu… (~10-20s)')
   try {
     lastResizedImage = await callResize('low')
     $('#resizeAfter').src = lastResizedImage
@@ -260,7 +260,7 @@ $('#resizeCancel').addEventListener('click', () => { $('#resizeOverlay').classLi
 // Le re-roll repart TOUJOURS du LOW validé (jamais d'une sortie HIGH) -> pas de dégradation cumulative.
 async function runResizeHigh() {
   if (!lastResizedImage) return runResizePreview() // sécurité : pas d'aperçu validé -> on (re)fait l'aperçu
-  showResizeLoading('Génération en haute qualité… (peut prendre 1-2 min)')
+  showResizeLoading('Génération en haute qualité… (~20-40s)')
   try {
     const hi = await callResize('high', lastResizedImage, 'enhance')
     applyResizedImage(hi)
