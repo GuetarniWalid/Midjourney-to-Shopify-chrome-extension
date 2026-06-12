@@ -360,7 +360,7 @@ async function runDecorGenerate() {
       'err'
     )
   if (state.needsResize) return toast("Retaillez d'abord l'image au bon format", 'err')
-  showDecorLoading('Génération du décor sur-mesure… (~1-2 min)')
+  showDecorLoading('Génération du décor sur-mesure… (~15-30s)')
   try {
     const product = productOf(state.productType)
     const vibeEl = $('#decorVibe')
@@ -456,7 +456,7 @@ async function callInsertJob(body) {
 // Re-roll : repart TOUJOURS du décor validé + l'œuvre d'origine (jamais d'un rendu précédent).
 async function runInsertGenerate() {
   if (!state.decor || !state.imageDataUrl) return toast('Validez d’abord un décor', 'err')
-  showInsertLoading('Insertion de votre œuvre dans le décor… (~1-2 min)')
+  showInsertLoading('Insertion de votre œuvre dans le décor… (~20-40s)')
   try {
     const product = productOf(state.productType)
     const fidelity = $('#insertHighFidelity') && $('#insertHighFidelity').checked ? 'high' : 'standard'
@@ -501,6 +501,150 @@ $('#insertValidate').addEventListener('click', () => {
   $('#insertOverlay').classList.add('hidden')
   lastInsert = null
   toast('Rendu ajouté ✓', 'ok')
+})
+
+/* ---------- 3c. Ajouter un mockup (photo importée, nettoyée par IA) ---------- */
+// Une photo de mise en situation (même avec textes/logos superposés ou une œuvre déjà dans le
+// cadre) part au backend qui retire les marquages, vide le support en gris #ECECEC, le convertit
+// au type produit ACTIF et le met au ratio de l'œuvre EN COURS. Le résultat est un décor comme
+// les autres : utilisable tout de suite (insertion) et/ou enregistrable dans les templates.
+let cleanSrc = null // photo importée (dataURL) en attente de nettoyage
+let lastClean = null // dernier mockup nettoyé : { image, product, orientation } | null
+function showCleanLoading(msg) {
+  $('#cleanLoading').classList.remove('hidden')
+  $('#cleanLoadingMsg').textContent = msg
+  $('#cleanResult').classList.add('hidden')
+  $('#cleanSrcWrap').classList.add('hidden')
+  $('#cleanActions').classList.add('hidden')
+  $('#cleanStartActions').classList.add('hidden')
+}
+async function callCleanJob(body) {
+  const startRes = await fetch(API + '/api/clean-mockup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const startData = await safeJson(startRes)
+  const jobId = startData.data && startData.data.jobId
+  if (!startRes.ok || !startData.success || !jobId) {
+    throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
+  }
+  const startedAt = Date.now()
+  const MAX_MS = 11 * 60 * 1000
+  let netErrors = 0
+  while (true) {
+    if (Date.now() - startedAt > MAX_MS) throw new Error('Le nettoyage du mockup a expiré. Réessaye.')
+    await sleep(3000)
+    let res, data
+    try {
+      res = await fetch(API + '/api/clean-mockup/result?id=' + encodeURIComponent(jobId))
+      data = await safeJson(res)
+    } catch (e) {
+      if (++netErrors > 6) throw new Error('Connexion interrompue pendant le nettoyage.')
+      continue
+    }
+    netErrors = 0
+    if (res.status === 404 || data.status === 'not_found') throw new Error('Session expirée. Relance.')
+    if (data.status === 'error') throw new Error(data.message || 'Échec du nettoyage du mockup.')
+    if (data.status === 'done' && data.data && data.data.image) return data.data.image
+  }
+}
+function openCleanOverlay() {
+  if (!state.imageDataUrl) return toast("Ajoutez d'abord une image", 'err')
+  if (state.needsResize) return toast("Retaillez d'abord l'image au bon format", 'err')
+  cleanSrc = null
+  lastClean = null
+  $('#cleanFile').value = ''
+  $('#cleanOverlay').classList.remove('hidden')
+  $('#cleanLoading').classList.add('hidden')
+  $('#cleanResult').classList.add('hidden')
+  $('#cleanSrcWrap').classList.add('hidden')
+  $('#cleanActions').classList.add('hidden')
+  $('#cleanStartActions').classList.remove('hidden')
+  $('#cleanGenerate').disabled = true
+}
+$('#cleanFile').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0]
+  if (!f) return
+  if (!f.type.startsWith('image/')) return toast('Fichier non image', 'err')
+  const reader = new FileReader()
+  reader.onload = () => {
+    cleanSrc = reader.result
+    $('#cleanSrcImg').src = cleanSrc
+    $('#cleanSrcWrap').classList.remove('hidden')
+    $('#cleanResult').classList.add('hidden')
+    $('#cleanActions').classList.add('hidden')
+    $('#cleanStartActions').classList.remove('hidden')
+    $('#cleanGenerate').disabled = false
+  }
+  reader.readAsDataURL(f)
+})
+async function runCleanGenerate() {
+  if (!cleanSrc) return toast('Choisissez d’abord une photo de mockup', 'err')
+  showCleanLoading('Nettoyage du mockup… (~20-30s)')
+  try {
+    const product = productOf(state.productType)
+    const image = await callCleanJob({ image: cleanSrc, target: state.orientation, product })
+    // Métadonnées figées AU MOMENT du nettoyage (pas de dérive si on change de type ensuite).
+    lastClean = { image, product, orientation: state.orientation }
+    $('#cleanImg').src = image
+    $('#cleanLoading').classList.add('hidden')
+    $('#cleanResult').classList.remove('hidden')
+    $('#cleanActions').classList.remove('hidden')
+  } catch (e) {
+    $('#cleanLoading').classList.add('hidden')
+    $('#cleanSrcWrap').classList.remove('hidden')
+    $('#cleanStartActions').classList.remove('hidden')
+    toast('Mockup : ' + e.message, 'err')
+  }
+}
+// Enregistre le mockup nettoyé dans les templates — même rayon que les décors IA (l'origine
+// n'est qu'une métadonnée interne, aucun badge en galerie).
+async function saveCleanedMockup() {
+  if (!lastClean) return toast('Aucun mockup à enregistrer', 'err')
+  const btn = $('#cleanSave')
+  btn.disabled = true
+  try {
+    const r = await fetch(RENDER + '/api/saved-templates/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: lastClean.image,
+        product: lastClean.product,
+        orientation: lastClean.orientation,
+        theme: 'Mockup importé',
+        roomType: null,
+        origin: 'upload',
+      }),
+    })
+    const data = await r.json()
+    if (!data.success) throw new Error(data.error || 'échec')
+    toast('Mockup enregistré ★', 'ok')
+    await loadSavedTemplates()
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'err')
+  } finally {
+    btn.disabled = false
+  }
+}
+$('#mockupUploadBtn').addEventListener('click', openCleanOverlay)
+$('#cleanGenerate').addEventListener('click', runCleanGenerate)
+$('#cleanRegen').addEventListener('click', runCleanGenerate)
+$('#cleanSave').addEventListener('click', saveCleanedMockup)
+$('#cleanCancel').addEventListener('click', () => {
+  $('#cleanOverlay').classList.add('hidden')
+  cleanSrc = null
+  lastClean = null
+})
+$('#cleanClose').addEventListener('click', () => {
+  $('#cleanOverlay').classList.add('hidden')
+})
+// Utiliser tout de suite : le mockup nettoyé devient le décor validé -> insertion immédiate.
+$('#cleanValidate').addEventListener('click', () => {
+  if (!lastClean) return
+  state.decor = lastClean.image
+  $('#cleanOverlay').classList.add('hidden')
+  openInsertOverlay()
 })
 
 /* ---------- 2. Type produit + collections ---------- */
@@ -960,8 +1104,9 @@ const STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2
 const favStarHtml = (on) =>
   on ? `<span class="mc-fav-badge" title="Favori — appliqué automatiquement à votre œuvre" aria-label="Favori">${STAR_SVG}</span>` : ''
 
-// Section « Mockups » UNIFIÉE : catalogue Photopea + décors IA enregistrés, regroupés PAR PIÈCE.
-// Un signe PS/IA distingue l'origine ; l'étoile marque un favori (rendu auto quand l'image est prête).
+// Section « Mockups » UNIFIÉE : catalogue Photopea + décors enregistrés (IA générés OU photos
+// importées nettoyées — traités pareil), regroupés PAR PIÈCE. Seul le badge PS (Photoshop)
+// subsiste ; l'étoile marque un favori (rendu auto quand l'image est prête).
 function renderMockups() {
   const grid = $('#mockupGrid'),
     hint = $('#mockupsHint')
@@ -969,6 +1114,8 @@ function renderMockups() {
   grid.classList.toggle('disabled', !!state.needsResize)
   const decorBtn = $('#decorBtn')
   if (decorBtn) decorBtn.classList.toggle('hidden', !(state.orientation && !state.needsResize))
+  const uploadBtn = $('#mockupUploadBtn')
+  if (uploadBtn) uploadBtn.classList.toggle('hidden', !(state.orientation && !state.needsResize))
   if (!state.orientation) {
     hint.textContent = 'Ajoutez une image pour voir les mockups'
     return
@@ -1006,8 +1153,8 @@ function renderMockups() {
   }
 }
 
-// Vignette de la section Mockups : mockup Photopea (PS) OU décor IA enregistré (IA).
-// Tap = générer / réutiliser ; appui long = menu (favori / suppression).
+// Vignette de la section Mockups : mockup Photopea (badge PS) OU décor enregistré (sans badge,
+// qu'il soit généré par IA ou importé/nettoyé). Tap = générer / réutiliser ; appui long = menu.
 function buildMockupCell(e, ori) {
   const cell = document.createElement('div')
   if (e.kind === 'photopea') {
@@ -1033,7 +1180,7 @@ function buildMockupCell(e, ori) {
     const compatible = !oriT || oriT === ori
     cell.className = 'mockup-cell saved-cell' + (compatible ? '' : ' incompatible')
     cell.title = compatible ? '' : `Décor en ${labelOri(oriT)} — changez l'orientation de l'image`
-    cell.innerHTML = `<span class="mc-kind ai" title="Décor généré par IA">IA</span>${favStarHtml(!!t.favorite)}<img src="${renderUrl(t.url)}" loading="lazy" alt=""><div class="mc-label">${escapeHtml(t.theme || 'Décor IA')}</div>`
+    cell.innerHTML = `${favStarHtml(!!t.favorite)}<img src="${renderUrl(t.url)}" loading="lazy" alt=""><div class="mc-label">${escapeHtml(t.theme || 'Décor IA')}</div>`
     cell.addEventListener('click', () => {
       if (cell._suppressClick) { cell._suppressClick = false; return }
       reuseSavedDecor(t)

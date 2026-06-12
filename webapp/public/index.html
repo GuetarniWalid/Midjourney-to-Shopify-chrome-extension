@@ -90,6 +90,7 @@
       <p class="card-note">Appui long sur un mockup pour le mettre en favori ★. Vos favoris s'appliquent automatiquement dès que votre image est au bon format.</p>
       <div id="mockupGrid" class="mockup-grid"></div>
       <button id="decorBtn" class="ghost-btn decor-cta hidden">🎨 Créer un décor sur-mesure (IA)</button>
+      <button id="mockupUploadBtn" class="ghost-btn decor-cta hidden">📥 Ajouter un mockup (photo nettoyée par IA)</button>
     </section>
 
     <!-- 4. Rendus -->
@@ -206,6 +207,33 @@
         <button id="insertValidate" class="primary-btn">Valider ce rendu</button>
         <button id="insertRegen" class="ghost-btn">Régénérer l'insertion</button>
         <button id="insertClose" class="ghost-btn">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay d'ajout de mockup (photo importée, nettoyée par IA) -->
+  <div id="cleanOverlay" class="resize-overlay hidden">
+    <div class="resize-card">
+      <h3>Ajouter un mockup</h3>
+      <div class="resize-body">
+        <p class="card-note">Importez une photo de mise en situation — même avec textes, logos ou une œuvre déjà dans le cadre. L'IA retire tous les marquages, vide le support (gris neutre) au format de votre œuvre et le convertit au type produit choisi.</p>
+        <input type="file" id="cleanFile" accept="image/*" class="decor-vibe">
+        <div id="cleanSrcWrap" class="decor-result hidden"><img id="cleanSrcImg" alt="photo importée"></div>
+        <div id="cleanLoading" class="resize-loading hidden">
+          <div class="progress-ring"></div>
+          <p id="cleanLoadingMsg">Nettoyage du mockup…</p>
+        </div>
+        <div id="cleanResult" class="decor-result hidden"><img id="cleanImg" alt="mockup nettoyé"></div>
+      </div>
+      <div id="cleanStartActions" class="resize-actions">
+        <button id="cleanGenerate" class="primary-btn" disabled>Nettoyer le mockup</button>
+        <button id="cleanCancel" class="ghost-btn">Annuler</button>
+      </div>
+      <div id="cleanActions" class="resize-actions hidden">
+        <button id="cleanValidate" class="primary-btn">Utiliser ce mockup</button>
+        <button id="cleanSave" class="ghost-btn">★ Enregistrer ce mockup</button>
+        <button id="cleanRegen" class="ghost-btn">Renettoyer</button>
+        <button id="cleanClose" class="ghost-btn">Fermer</button>
       </div>
     </div>
   </div>

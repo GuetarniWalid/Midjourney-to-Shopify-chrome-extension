@@ -245,7 +245,7 @@ app.post('/api/saved-templates/photopea', async (req, res) => {
 // Sauvegarde un décor IA vierge : écrit l'image sur disque puis enregistre sa fiche.
 app.post('/api/saved-templates/ai', async (req, res) => {
   try {
-    const { image, product, orientation, theme, roomType } = req.body || {};
+    const { image, product, orientation, theme, roomType, origin } = req.body || {};
     if (!image || !image.startsWith('data:')) return res.status(400).json({ success: false, error: 'image (dataURL) requise' });
     const m = image.match(/^data:([^;]+);base64,(.*)$/);
     if (!m) return res.status(400).json({ success: false, error: 'dataURL invalide' });
@@ -262,6 +262,7 @@ app.post('/api/saved-templates/ai', async (req, res) => {
           id: newId('ai_'), file, product: product || 'canvas',
           orientation: orientation || null, theme: theme || null,
           roomType: roomType || null, // pièce choisie au dropdown -> regroupement par pièce dans l'UI
+          origin: origin === 'upload' ? 'upload' : null, // provenance interne (debug) : 'upload' = photo importée nettoyée, null = décor généré
           savedAt: new Date().toISOString(),
         };
         db.ai.push(r);
