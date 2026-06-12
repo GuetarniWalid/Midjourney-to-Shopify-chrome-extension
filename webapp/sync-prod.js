@@ -7,6 +7,7 @@
 'use strict'
 const fs = require('fs')
 const path = require('path')
+const crypto = require('crypto')
 
 const FRONT = path.join(__dirname, 'public')
 const BACKEND = process.argv[2] || path.join(__dirname, '..', '..', 'MyselfMonArt_Backend')
@@ -20,10 +21,18 @@ for (const f of ['app.js', 'style.css']) {
 }
 
 // --- 2. publisher.edge régénéré depuis index.html ---
+// Cache-busting : les assets prod partent avec Cache-Control: max-age=14400 (4 h) -> sans
+// version dans l'URL, les téléphones gardent l'ANCIEN app.js après un déploiement (bouton
+// invisible, etc.). On suffixe ?v=<hash du contenu> : nouvelle version = URL neuve = rechargée.
+const sha10 = (f) =>
+  crypto.createHash('sha256').update(fs.readFileSync(path.join(FRONT, f))).digest('hex').slice(0, 10)
+const vJs = sha10('app.js')
+const vCss = sha10('style.css')
+
 let html = fs.readFileSync(path.join(FRONT, 'index.html'), 'utf8')
 
 const cssLocal = '<link rel="stylesheet" href="style.css">'
-const cssProd = '<link rel="stylesheet" href="/publisher/style.css">'
+const cssProd = `<link rel="stylesheet" href="/publisher/style.css?v=${vCss}">`
 if (!html.includes(cssLocal)) throw new Error('ancre stylesheet introuvable dans index.html')
 html = html.replace(cssLocal, cssProd)
 
@@ -42,7 +51,7 @@ const edgeConfig = [
   '    mode: {{{ JSON.stringify(mode || \'\') }}}',
   '  };',
   '</script>',
-  '<script src="/publisher/app.js"></script>',
+  `<script src="/publisher/app.js?v=${vJs}"></script>`,
 ].join('\n')
 html = html.replace(configAnchor, edgeConfig)
 
@@ -50,7 +59,6 @@ fs.writeFileSync(EDGE, html)
 console.log(`généré ${EDGE}`)
 
 // --- 3. vérification de parité ---
-const crypto = require('crypto')
 const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 12)
 for (const f of ['app.js', 'style.css']) {
   const a = sha(path.join(FRONT, f))
