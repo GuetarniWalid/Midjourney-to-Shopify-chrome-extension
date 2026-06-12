@@ -162,15 +162,11 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .pi-badge{flex:0 0 auto;padding:2px 8px;border-radius:var(--pill);font:600 11px/1.4 inherit;
   background:#FBF1E3;color:var(--warn)}
 .chosen-info{font-size:13px;color:var(--muted);font-weight:500;white-space:nowrap}
-/* rangée (lecture seule) des images actuelles du produit choisi — vignettes ~56px arrondies */
-.current-images{display:flex;flex-direction:column;gap:var(--s2);margin-top:var(--s4)}
-.current-images-label{font-size:14px;color:var(--muted);font-weight:500}
-.current-images-row{display:flex;gap:var(--s2);overflow-x:auto;padding-bottom:var(--s1)}
-.current-thumb{width:56px;height:56px;flex:0 0 auto;border-radius:var(--r-sm);object-fit:cover;
-  border:1px solid var(--border);background:var(--surface-2)}
 .video-note{margin:var(--s3) 0 0;font-size:13px;line-height:1.5;color:var(--muted)}
 /* zone d'upload verrouillée tant qu'aucun produit n'est choisi (mode reimage) */
 .dropzone.locked{cursor:not-allowed;opacity:.6}
+/* reimage v2 : l'œuvre est FIGÉE — la zone n'est qu'une vitrine, jamais un sélecteur de fichier */
+.dropzone.readonly{cursor:default}
 
 /* ---- grille mockups / rendus ---- */
 .mockup-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr));gap:var(--s4)}
@@ -223,6 +219,9 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .result-cell img{width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
 .result-cell .num{position:absolute;top:var(--s2);left:var(--s2);min-width:22px;height:22px;padding:0 6px;border-radius:var(--pill);
   background:var(--accent);color:#fff;font-size:12px;font-weight:600;display:grid;place-items:center}
+/* reimage v2 : distingue les rendus fraîchement générés des images conservées du produit */
+.result-cell .new-badge{position:absolute;bottom:var(--s2);left:var(--s2);padding:2px 8px;border-radius:var(--pill);
+  background:#E8F4EC;color:var(--ok,#1B7A3D);font-size:11px;font-weight:600}
 .result-cell .del{position:absolute;top:var(--s2);right:var(--s2);width:28px;height:28px;border-radius:50%;
   background:rgba(28,32,36,.55);color:#fff;border:0;cursor:pointer;font-size:13px;display:grid;place-items:center}
 .result-cell .del:hover{background:var(--danger)}

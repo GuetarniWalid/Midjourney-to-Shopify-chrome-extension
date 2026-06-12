@@ -41,6 +41,11 @@ const state = {
   lastBatchImage: null, // dernière œuvre pour laquelle les favoris ont été appliqués auto
   batchToken: null, // jeton du lot de favoris courant (sert à annuler un lot devenu périmé)
   product: null, // mode reimage : contexte du produit choisi {id, title, orientation, productType, images, hasVideo}
+  // mode reimage v2 : l'œuvre est FIGÉE (toujours l'image n°2 du produit, l'image par défaut).
+  // Elle n'est jamais ré-uploadée : à la publication elle est référencée par son mediaId.
+  oeuvre: null, // {mediaId, url (pleine résolution), alt} | null
+  initialFp: null, // empreinte de la galerie au chargement du produit (détection « modifié »)
+  publishFp: null, // empreinte au moment où la clé d'idempotence a été créée (rotation si contenu changé)
 }
 
 /* ---------- Toast ---------- */
@@ -83,7 +88,9 @@ dropzone.addEventListener('drop', (e) => {
 })
 
 function loadImageFile(file) {
-  if (IS_REIMAGE && !state.product) return toast("Choisissez d'abord le produit à refaire", 'err')
+  // reimage v2 : l'œuvre est figée (image n°2 du produit) — aucun upload possible.
+  // Changer d'œuvre = nouveau produit = l'app de création.
+  if (IS_REIMAGE) return toast("L'œuvre est figée en mode reimage — utilisez l'app de création pour une nouvelle œuvre", 'err')
   if (!file.type.startsWith('image/')) return toast('Fichier non image', 'err')
   const reader = new FileReader()
   reader.onload = () => {
@@ -334,7 +341,11 @@ async function callDecorJob(body) {
 // Ouvre l'overlay en état "prêt" : le champ d'orientation + le bouton Générer sont visibles
 // AVANT toute génération (on peut donc orienter dès le 1er décor).
 function openDecorOverlay() {
-  if (!state.imageDataUrl) return toast("Ajoutez d'abord une image", 'err')
+  if (!state.imageDataUrl)
+    return toast(
+      IS_REIMAGE ? "L'œuvre n'est pas encore chargée — réessayez dans un instant" : "Ajoutez d'abord une image",
+      'err'
+    )
   if (state.needsResize) return toast("Retaillez d'abord l'image au bon format", 'err')
   $('#decorOverlay').classList.remove('hidden')
   $('#decorLoading').classList.add('hidden')
@@ -343,7 +354,11 @@ function openDecorOverlay() {
   $('#decorStartActions').classList.remove('hidden')
 }
 async function runDecorGenerate() {
-  if (!state.imageDataUrl) return toast("Ajoutez d'abord une image", 'err')
+  if (!state.imageDataUrl)
+    return toast(
+      IS_REIMAGE ? "L'œuvre n'est pas encore chargée — réessayez dans un instant" : "Ajoutez d'abord une image",
+      'err'
+    )
   if (state.needsResize) return toast("Retaillez d'abord l'image au bon format", 'err')
   showDecorLoading('Génération du décor sur-mesure… (~1-2 min)')
   try {
@@ -492,17 +507,26 @@ $('#insertValidate').addEventListener('click', () => {
 $$('#productType .seg-btn').forEach((btn) =>
   btn.addEventListener('click', () => {
     if (state.productType === btn.dataset.type) return
-    // changer de type = autres collections ET autres rendus -> on réinitialise les rendus générés
+    // changer de type = autres collections ET autres rendus -> on réinitialise les rendus
+    // générés. En reimage, les vignettes CONSERVÉES du produit restent (seuls les rendus
+    // générés avec l'ancien type sautent).
+    const generated = IS_REIMAGE ? state.results.filter((r) => !r.kept) : state.results
     if (
-      state.results.length &&
-      !confirm('Changer de type de produit va effacer les rendus déjà générés. Continuer ?')
+      generated.length &&
+      !confirm(
+        IS_REIMAGE
+          ? 'Changer de type va effacer les rendus générés (les images du produit restent). Continuer ?'
+          : 'Changer de type de produit va effacer les rendus déjà générés. Continuer ?'
+      )
     )
       return
     $$('#productType .seg-btn').forEach((b) => b.classList.remove('active'))
     btn.classList.add('active')
     state.productType = btn.dataset.type
-    clearResults()
-    if (!IS_REIMAGE) {
+    if (IS_REIMAGE) {
+      dropGeneratedResults()
+    } else {
+      clearResults()
       clearCollection()
       loadCollections() // en mode reimage il n'y a pas de collection à choisir
     }
@@ -511,6 +535,18 @@ $$('#productType .seg-btn').forEach((btn) =>
     maybeRunFavorites()
   })
 )
+
+// Retire UNIQUEMENT les rendus générés — les vignettes conservées du produit restent
+// (mode reimage : changement de type produit, la curation en cours ne doit pas se perdre).
+function dropGeneratedResults() {
+  state.batchToken = {} // périme un lot de favoris en vol
+  for (const r of state.results)
+    if (!r.kept && r.path)
+      fetch(RENDER + '/api/upload/' + r.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
+  state.results = state.results.filter((r) => r.kept)
+  renderResults()
+  refreshAction()
+}
 
 // Vide la galerie de rendus (et supprime les fichiers serveur correspondants)
 function clearResults() {
@@ -598,12 +634,13 @@ const ORI_LABELS = { portrait: 'Portrait', landscape: 'Paysage', square: 'Carré
 let prodSearchT = null // timer du debounce de la recherche produit
 let prodResults = [] // derniers produits affichés dans la liste (pour retrouver l'objet au clic)
 let prodSelectToken = null // identité du chargement de contexte en cours (anti-réponse périmée)
+let oeuvreLoadToken = null // identité du chargement de l'œuvre en cours (anti-réponse périmée)
 
 // Réécrit l'UI pour le mode reimage : carte produit visible, numéros des cartes, header, libellés.
 function initReimageUi() {
   $('.brand em').textContent = 'Refaire les images'
   $('#productCard').classList.remove('hidden')
-  $('#uploadCard .card-title').textContent = '2 · Votre image'
+  $('#uploadCard .card-title').textContent = "2 · L'œuvre (figée)"
   $('#mockupsCard .card-title').textContent = '3 · Mockups'
   $('#resultsCard .card-title').textContent = '4 · Vos rendus'
   // pas de collection en mode reimage ; le type produit est auto -> la carte paramètres ne
@@ -612,15 +649,29 @@ function initReimageUi() {
   $('#paramsCard').classList.add('hidden')
   $('#paramsCard .card-title').textContent = 'Type de produit'
   $('#publishBtn').textContent = 'Remplacer les images'
+  // l'œuvre est figée : pas d'upload, pas de favoris auto — la note des mockups change de sens
+  $('#mockupsCard .card-note').textContent =
+    'Touchez un mockup pour générer un rendu avec l’œuvre du produit. Les nouveaux rendus s’ajoutent à la fin de la galerie.'
+  fileInput.disabled = true // le label ne peut plus ouvrir le sélecteur de fichier
+  dropzone.classList.add('readonly')
+  // les vignettes de la galerie viennent du produit : l'état vide doit le dire
+  $('#resultsEmpty').textContent = 'Choisissez un produit : ses images actuelles apparaîtront ici.'
   updateDropzoneLock()
 }
 
 // Zone d'upload inactive tant qu'aucun produit n'est choisi (mode reimage uniquement).
+// Une fois le produit choisi, la zone n'est PAS déverrouillée pour autant : elle ne sert
+// qu'à afficher l'œuvre (figée) — voir applyOeuvre().
 function updateDropzoneLock() {
   const locked = IS_REIMAGE && !state.product
   dropzone.classList.toggle('locked', locked)
   const b = $('#dzInner b')
-  if (b) b.textContent = locked ? "Choisissez d'abord le produit à refaire" : 'Touchez pour choisir une image'
+  if (b)
+    b.textContent = locked
+      ? "Choisissez d'abord le produit à refaire"
+      : IS_REIMAGE
+        ? 'Chargement de l’œuvre…'
+        : 'Touchez pour choisir une image'
 }
 
 async function searchProducts(term) {
@@ -670,30 +721,121 @@ function renderProductChosen() {
   prodChosen.classList.remove('hidden')
 }
 
-// Rangée (lecture seule) des images actuelles du produit + note « vidéo conservée ».
-function renderProductImages(ctx) {
-  const wrap = $('#productImagesWrap'),
-    row = $('#productImages'),
-    note = $('#productVideoNote')
+// Empreinte ordonnée de la galerie : médias conservés par mediaId, nouveaux rendus par id
+// local. Sert au bouton publier (« quelque chose a-t-il changé ? ») ET à la rotation de la
+// clé d'idempotence (un payload différent ne doit jamais être dédupliqué par l'ancien).
+const galleryFp = () => state.results.map((r) => (r.kept ? r.mediaId : 'new:' + r.id)).join('|')
+
+// L'œuvre du produit — TOUJOURS son image n°2 (index 1) : c'est l'image par défaut que le
+// Publisher place en 2e position à chaque publication. Produit à une seule image : celle-là.
+// Elle s'affiche dans la carte « L'œuvre (figée) » et sert de SOURCE aux nouveaux rendus,
+// mais n'est jamais ré-uploadée (référencée par mediaId à la publication).
+function applyOeuvre(ctx) {
   const imgs = (ctx && ctx.images) || []
-  row.innerHTML = imgs
-    .map((im) => `<img class="current-thumb" src="${escapeHtml(im.url)}" alt="${escapeHtml(im.alt || '')}" loading="lazy">`)
-    .join('')
-  wrap.classList.toggle('hidden', !imgs.length)
-  note.classList.toggle('hidden', !(ctx && ctx.hasVideo))
+  const o = imgs.length >= 2 ? imgs[1] : imgs[0] || null
+  state.oeuvre = o && o.id ? { mediaId: o.id, url: o.fullUrl || o.url, alt: o.alt || null } : null
+  state.imageDataUrl = null
+  state.needsResize = false
+  state.sourceRatio = null
+  state.lastBatchImage = null
+  state.decor = null // un décor validé pour l'ancien produit ne doit pas servir au nouveau
+  const token = (oeuvreLoadToken = {})
+  const badge = $('#orientationBadge')
+  if (!state.oeuvre || !state.oeuvre.url) {
+    sourcePreview.src = ''
+    sourcePreview.classList.add('hidden')
+    dzInner.classList.remove('hidden')
+    state.orientation = ctx.orientation || null
+    badge.classList.add('hidden')
+    toast('Produit sans œuvre exploitable — choisissez-en un autre.', 'err')
+    renderMockups()
+    return
+  }
+  // affichage immédiat (le <img> charge le CDN directement, pas de CORS pour un simple affichage)
+  sourcePreview.src = state.oeuvre.url
+  sourcePreview.classList.remove('hidden')
+  dzInner.classList.add('hidden')
+  // orientation : verrou produit si connu, sinon déduite des dimensions réelles de l'œuvre
+  const setOri = (ori) => {
+    state.orientation = ori
+    badge.textContent = ORI_LABELS[ori] || ori
+    badge.className = 'badge ' + ori
+    badge.classList.remove('hidden')
+    renderMockups()
+    refreshAction()
+  }
+  if (ctx.orientation) setOri(ctx.orientation)
+  const probe = new Image()
+  probe.onload = () => {
+    if (token !== oeuvreLoadToken) return
+    state.sourceRatio = probe.naturalWidth / probe.naturalHeight
+    if (!ctx.orientation) {
+      const r = state.sourceRatio
+      setOri(r >= 0.9 && r <= 1.1 ? 'square' : r < 0.9 ? 'portrait' : 'landscape')
+    }
+  }
+  probe.src = state.oeuvre.url
+  // data URL pour la GÉNÉRATION (Photopea / décor IA). En cas d'échec (CORS/réseau),
+  // la curation — supprimer, réordonner, publier — reste entièrement possible.
+  urlToDataUrl(state.oeuvre.url)
+    .then((d) => {
+      if (token !== oeuvreLoadToken) return
+      state.imageDataUrl = d
+    })
+    .catch(() => {
+      if (token !== oeuvreLoadToken) return
+      toast('Œuvre non téléchargeable — génération indisponible (curation toujours possible).', 'err')
+    })
+}
+
+// Galerie seedée avec les images ACTUELLES du produit (sauf l'œuvre) : chaque vignette est
+// normale — supprimable, réordonnable — et référencée par son mediaId (jamais ré-uploadée,
+// URL CDN et alt intacts). Les nouveaux rendus générés s'ajouteront à la suite.
+function seedGalleryFromProduct(ctx) {
+  const imgs = (ctx && ctx.images) || []
+  const oeuvreId = state.oeuvre && state.oeuvre.mediaId
+  state.results = imgs
+    .filter((im) => im.id !== oeuvreId)
+    .map((im) => ({
+      id: 'keep-' + im.id,
+      kept: true,
+      mediaId: im.id,
+      path: null, // aucun fichier temp serveur : rien à nettoyer côté render server
+      url: im.url || im.fullUrl,
+      context: null,
+      label: 'Image actuelle',
+    }))
+  state.initialFp = galleryFp()
+  renderResults()
 }
 
 function clearProduct() {
   state.product = null
   state.publishKey = null // changement/désélection de produit => nouvelle clé d'idempotence
+  state.publishFp = null
   prodSelectToken = {} // périme un chargement de contexte encore en vol
+  oeuvreLoadToken = {} // périme un chargement d'œuvre encore en vol
   prodChosen.classList.add('hidden')
   prodChosen.innerHTML = ''
   prodSearch.value = ''
   prodSearch.classList.remove('hidden')
   prodList.classList.add('hidden')
-  renderProductImages(null)
+  $('#productVideoNote').classList.add('hidden')
   $('#paramsCard').classList.add('hidden')
+  // l'œuvre et la galerie appartiennent au produit : tout part avec lui
+  state.oeuvre = null
+  state.imageDataUrl = null
+  state.orientation = null
+  state.sourceRatio = null
+  state.needsResize = false
+  state.initialFp = null
+  state.decor = null
+  sourcePreview.src = ''
+  sourcePreview.classList.add('hidden')
+  dzInner.classList.remove('hidden')
+  $('#orientationBadge').classList.add('hidden')
+  clearResults() // vide aussi les rendus générés (fichiers temp serveur compris)
+  renderMockups()
   updateDropzoneLock()
   refreshAction()
 }
@@ -723,11 +865,12 @@ async function selectProduct(p) {
   applyReimageContext(ctx)
 }
 
-// Applique le contexte du produit : verrouillage type/orientation + reset intelligent (D7).
+// Applique le contexte du produit : verrouillage type/orientation, œuvre figée (image n°2),
+// galerie re-seedée avec les images actuelles du produit. Changer de produit = session neuve.
 function applyReimageContext(ctx) {
-  const prevOri = state.orientation // orientation de la session (image éventuellement déjà chargée)
   state.product = ctx
   state.publishKey = null // tout changement de produit => nouvelle clé d'idempotence
+  state.publishFp = null
 
   // type de produit auto : segment caché si le type est connu, sinon choix manuel
   const uiType = BACKEND_TYPE_TO_UI[ctx.productType] || null
@@ -746,55 +889,25 @@ function applyReimageContext(ctx) {
   }
 
   renderProductChosen()
-  renderProductImages(ctx)
+  $('#productVideoNote').classList.toggle('hidden', !ctx.hasVideo)
   updateDropzoneLock()
 
-  // orientation indéterminable (produit ancien) -> comportement actuel : détection auto (D6)
-  if (!ctx.orientation)
-    toast("Orientation du produit indéterminable — détection automatique depuis l'image.")
-
-  // image déjà chargée : on ré-évalue orientation/format contre le nouveau verrou.
-  // Toast « produit changé » émis AVANT detectOrientation : l'avertissement de
-  // conversion de format (le plus important) doit rester le dernier visible.
-  if (state.imageDataUrl) {
-    const r = state.sourceRatio
-    const naturalOri = r >= 0.9 && r <= 1.1 ? 'square' : r < 0.9 ? 'portrait' : 'landscape'
-    const nextOri = ctx.orientation || naturalOri
-    if (nextOri === prevOri) {
-      if (state.results.length)
-        toast('Produit changé — vos rendus sont conservés (même orientation).', 'ok')
-    } else {
-      const hadResults = state.results.length > 0
-      clearResults() // orientation différente : les rendus existants ne sont plus valables
-      toast(
-        `Produit changé — orientation ${labelOri(prevOri)} → ${labelOri(nextOri)}` +
-          (hadResults ? ' : rendus effacés.' : '.')
-      )
-    }
-    detectOrientation(state.sourceRatio, 1) // seul le ratio compte (le verrou s'applique dedans)
-    renderMockups()
-  }
+  // v2 : changer de produit = session entièrement re-seedée depuis CE produit (les rendus
+  // d'une éventuelle session précédente venaient d'une AUTRE œuvre — plus de sens ici).
+  clearResults()
+  applyOeuvre(ctx)
+  seedGalleryFromProduct(ctx)
   refreshAction()
 }
 
 // Reset COMPLET de la session reimage après un remplacement réussi (D10).
+// clearProduct() emporte désormais l'œuvre, la galerie et les empreintes.
 function resetReimageSession() {
-  clearResults()
-  state.imageDataUrl = null
-  state.orientation = null
-  state.sourceRatio = null
-  state.needsResize = false
   state.lastBatchImage = null
-  state.decor = null
   fileInput.value = ''
-  sourcePreview.src = ''
-  sourcePreview.classList.add('hidden')
-  dzInner.classList.remove('hidden')
   changeBtn.classList.add('hidden')
-  $('#orientationBadge').classList.add('hidden')
   updateRatioUI()
-  clearProduct() // produit désélectionné (re-verrouille la zone d'upload) + refreshAction
-  renderMockups()
+  clearProduct() // produit désélectionné (re-verrouille la zone) + clearResults + refreshAction
 }
 
 if (IS_REIMAGE && prodSearch) {
@@ -823,12 +936,10 @@ if (IS_REIMAGE && prodSearch) {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#productCard .combo')) prodList.classList.add('hidden')
   })
-  // zone d'upload verrouillée tant qu'aucun produit n'est choisi (le label n'ouvre pas le sélecteur)
+  // l'œuvre est FIGÉE : le label n'ouvre jamais le sélecteur de fichier en mode reimage
   dropzone.addEventListener('click', (e) => {
-    if (!state.product) {
-      e.preventDefault()
-      toast("Choisissez d'abord le produit à refaire", 'err')
-    }
+    e.preventDefault()
+    if (!state.product) toast("Choisissez d'abord le produit à refaire", 'err')
   })
 }
 
@@ -942,7 +1053,11 @@ function generate(catName, sub, layout, cell) {
 }
 // Cœur du rendu Photopea, réutilisé par les mockups ET les favoris sauvegardés.
 async function renderWithPsd({ psd, context, label }, cell) {
-  if (!state.imageDataUrl) return toast('Choisissez une image', 'err')
+  if (!state.imageDataUrl)
+    return toast(
+      IS_REIMAGE ? "L'œuvre n'est pas encore chargée — réessayez dans un instant" : 'Choisissez une image',
+      'err'
+    )
   if (state.needsResize)
     return toast("Retaillez d'abord l'image (3:4, carré ou 4:3)", 'err')
   cell.classList.add('busy')
@@ -1129,6 +1244,7 @@ async function toggleAiFavorite(t) {
 // Dès que l'image est au bon format, on applique l'œuvre à TOUS les favoris, en un lot, une
 // seule fois par œuvre : mockups Photopea favoris -> rendu ; décors IA favoris -> insertion.
 function maybeRunFavorites() {
+  if (IS_REIMAGE) return // v2 : génération 100 % manuelle (pas de lot auto sur l'œuvre du produit)
   if (!state.imageDataUrl || state.needsResize || !state.orientation) return
   if (state.lastBatchImage === state.imageDataUrl) return // déjà appliqué pour cette œuvre
   runFavoritesBatch()
@@ -1226,7 +1342,10 @@ function renderResults() {
     const cell = document.createElement('div')
     cell.className = 'result-cell'
     cell.dataset.id = res.id
-    cell.innerHTML = `<div class="num">${i + 1}</div><button class="del" title="Supprimer">✕</button><img src="${res.url}" alt="" draggable="false">`
+    cell.innerHTML =
+      `<div class="num">${i + 1}</div>` +
+      (IS_REIMAGE && !res.kept ? '<span class="new-badge">nouveau</span>' : '') +
+      `<button class="del" title="Supprimer">✕</button><img src="${res.url}" alt="" draggable="false">`
     cell.querySelector('.del').addEventListener('click', (ev) => {
       ev.stopPropagation()
       removeResult(res.id)
@@ -1404,6 +1523,7 @@ function finishDrop() {
   grid.classList.remove('reordering')
   grid.style.minHeight = '' // déverrouille la hauteur avant la reconstruction (hauteur naturelle)
   renderResults() // reconstruit dans le nouvel ordre (détruit le proxy + le placeholder, renumérote)
+  refreshAction() // reimage v2 : un simple réordonnancement est un changement publiable
   // FLIP d'atterrissage : la nouvelle cellule part visuellement de la position du doigt et glisse
   // jusqu'à son slot via la transition CSS de base. Aucun timer différé -> aucune course possible.
   const fresh = [...grid.children].find((c) => c.dataset && c.dataset.id === cur.id)
@@ -1627,7 +1747,9 @@ function refreshAction() {
   btn.disabled = !(state.collection && n > 0 && state.imageDataUrl)
 }
 
-// Variante reimage : actif ssi produit choisi + image au bon format + au moins 1 rendu (D9).
+// Variante reimage v2 : actif ssi produit choisi + œuvre identifiée + ≥1 mockup en galerie
+// + au moins un CHANGEMENT réel (suppression, réordonnancement ou nouveau rendu).
+// Garder ≥1 mockup protège l'invariant « œuvre = image n°2 » (sinon elle passerait en n°1).
 function refreshActionReimage() {
   const info = $('#actionInfo'),
     btn = $('#publishBtn')
@@ -1637,17 +1759,23 @@ function refreshActionReimage() {
     btn.disabled = true
     return
   }
-  if (state.needsResize) {
-    info.textContent = "⚠️ Retaille l'image au bon format pour publier"
+  if (!state.oeuvre) {
+    info.textContent = 'Produit sans œuvre exploitable'
     btn.disabled = true
     return
   }
-  const parts = []
-  if (state.orientation) parts.push(labelOri(state.orientation))
-  parts.push(state.product.title)
-  parts.push(`${n} rendu${n > 1 ? 's' : ''}`)
-  info.textContent = parts.join(' · ')
-  btn.disabled = !(n > 0 && state.imageDataUrl)
+  if (!n) {
+    info.textContent = 'Gardez ou générez au moins un mockup'
+    btn.disabled = true
+    return
+  }
+  const dirty = state.initialFp !== null && galleryFp() !== state.initialFp
+  const kept = state.results.filter((r) => r.kept).length
+  const fresh = n - kept
+  const parts = [state.product.title, `${kept} conservée${kept > 1 ? 's' : ''}`]
+  if (fresh) parts.push(`${fresh} nouvelle${fresh > 1 ? 's' : ''}`)
+  info.textContent = parts.join(' · ') + (dirty ? '' : ' — aucun changement')
+  btn.disabled = !dirty
 }
 
 $('#publishBtn').addEventListener('click', async () => {
@@ -1657,7 +1785,9 @@ $('#publishBtn').addEventListener('click', async () => {
   progress.show('Préparation des images…')
   if (IS_REIMAGE) $('#progressTitle').textContent = 'Remplacement en cours…'
   try {
-    // ordre: [mockup1, original, mockup2, ...]
+    // ordre: [mockup1, original, mockup2, ...] — l'œuvre est TOUJOURS l'image n°2 (l'image
+    // par défaut du produit). En reimage v2, les vignettes conservées et l'œuvre sont
+    // référencées par mediaId (jamais re-téléversées) ; seuls les nouveaux rendus partent en base64.
     const imgs = []
     const toB64 = async (u) => {
       const resp = await fetch(u)
@@ -1672,20 +1802,30 @@ $('#publishBtn').addEventListener('click', async () => {
     }
     for (let i = 0; i < state.results.length; i++) {
       progress.step(`Préparation des images… (${i + 1}/${state.results.length})`)
-      imgs.push({
-        base64Image: await toB64(state.results[i].url),
-        type: 'mockup',
-        mockupContext: state.results[i].context,
-      })
-      if (i === 0) imgs.push({ base64Image: state.imageDataUrl, type: 'original' })
+      const res = state.results[i]
+      if (IS_REIMAGE && res.kept) {
+        imgs.push({ mediaId: res.mediaId, type: 'mockup' })
+      } else {
+        imgs.push({ base64Image: await toB64(res.url), type: 'mockup', mockupContext: res.context })
+      }
+      if (i === 0)
+        imgs.push(
+          IS_REIMAGE
+            ? { mediaId: state.oeuvre.mediaId, type: 'original' }
+            : { base64Image: state.imageDataUrl, type: 'original' }
+        )
     }
-    // Clé d'idempotence : stable tant qu'on n'a pas publié avec succès, donc un
-    // re-clic après un timeout (524) renvoie le produit déjà créé au lieu d'un doublon.
-    if (!state.publishKey) {
+    // Clé d'idempotence : stable tant que le CONTENU à publier ne change pas — un re-clic
+    // après un timeout (524) renvoie le résultat déjà obtenu au lieu d'un doublon. En
+    // reimage, une galerie MODIFIÉE après un échec doit repartir avec une clé neuve
+    // (sinon le backend dédupliquerait un payload différent).
+    const fpNow = IS_REIMAGE ? galleryFp() : null
+    if (!state.publishKey || (IS_REIMAGE && state.publishFp !== fpNow)) {
       state.publishKey =
         self.crypto && crypto.randomUUID
           ? crypto.randomUUID()
           : 'pk_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+      state.publishFp = fpNow
     }
     // mode reimage : on remplace les images d'un produit existant (mêmes images, autre cible)
     const payload = IS_REIMAGE
