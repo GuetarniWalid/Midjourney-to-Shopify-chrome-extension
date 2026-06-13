@@ -184,6 +184,22 @@ async function safeJson(res) {
     return {}
   }
 }
+// fetch + parse JSON sous UN SEUL timeout : borne l'attente des en-têtes ET du corps de la
+// réponse. Sans ça, un START (ou un poll) dont la connexion stalle — réponse jamais reçue, ou
+// en-têtes reçus mais corps qui n'arrive jamais — laissait le spinner tourner à l'infini (les
+// boucles de polling ne sont bornées que si chaque fetch finit par résoudre ou rejeter).
+// En cas de dépassement, abort -> le fetch/json lève AbortError (à traiter par l'appelant).
+async function fetchJsonT(url, opts = {}, ms = 30000) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), ms)
+  try {
+    const res = await fetch(url, { ...opts, signal: ctrl.signal })
+    const data = await safeJson(res)
+    return { res, data }
+  } finally {
+    clearTimeout(timer)
+  }
+}
 // Redimensionnement ASYNCHRONE : on démarre un job (réponse immédiate) puis on
 // interroge son état en boucle. Chaque requête est courte -> jamais de 524 Cloudflare,
 // quelle que soit la durée réelle de gpt-image-2.
@@ -191,17 +207,29 @@ async function safeJson(res) {
 // mode 'recompose' (recomposer l'original pour remplir le cadre) ou 'enhance' (re-rendu FIDÈLE
 // de l'aperçu LOW déjà validé -> le HIGH est exactement le LOW validé, pas une nouvelle image).
 async function callResize(quality, sourceImage, mode) {
-  const startRes = await fetch(API + '/api/resize-artwork', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      image: sourceImage || state.imageDataUrl,
-      target: state.orientation,
-      quality,
-      mode: mode || 'recompose',
-    }),
-  })
-  const startData = await safeJson(startRes)
+  let startRes, startData
+  try {
+    ;({ res: startRes, data: startData } = await fetchJsonT(
+      API + '/api/resize-artwork',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: sourceImage || state.imageDataUrl,
+          target: state.orientation,
+          quality,
+          mode: mode || 'recompose',
+        }),
+      },
+      90000
+    ))
+  } catch (e) {
+    throw new Error(
+      e.name === 'AbortError'
+        ? 'Le service met trop de temps à démarrer. Réessaye.'
+        : 'Connexion au serveur impossible.'
+    )
+  }
   const jobId = startData.data && startData.data.jobId
   if (!startRes.ok || !startData.success || !jobId) {
     throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
@@ -216,8 +244,11 @@ async function callResize(quality, sourceImage, mode) {
     await sleep(quality === 'high' ? 3000 : 2000)
     let res, data
     try {
-      res = await fetch(API + '/api/resize-artwork/result?id=' + encodeURIComponent(jobId))
-      data = await safeJson(res)
+      ;({ res, data } = await fetchJsonT(
+        API + '/api/resize-artwork/result?id=' + encodeURIComponent(jobId),
+        {},
+        20000
+      ))
     } catch (e) {
       if (++netErrors > 6) throw new Error('Connexion interrompue pendant la génération.')
       continue // coupure réseau transitoire -> on retente
@@ -307,12 +338,20 @@ function showDecorLoading(msg) {
 }
 // démarre le job de génération de décor puis interroge son état (job + polling -> jamais de 524)
 async function callDecorJob(body) {
-  const startRes = await fetch(API + '/api/generate-decor', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const startData = await safeJson(startRes)
+  let startRes, startData
+  try {
+    ;({ res: startRes, data: startData } = await fetchJsonT(
+      API + '/api/generate-decor',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      90000
+    ))
+  } catch (e) {
+    throw new Error(
+      e.name === 'AbortError'
+        ? 'Le service met trop de temps à démarrer. Réessaye.'
+        : 'Connexion au serveur impossible.'
+    )
+  }
   const jobId = startData.data && startData.data.jobId
   if (!startRes.ok || !startData.success || !jobId) {
     throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
@@ -325,8 +364,11 @@ async function callDecorJob(body) {
     await sleep(3000)
     let res, data
     try {
-      res = await fetch(API + '/api/generate-decor/result?id=' + encodeURIComponent(jobId))
-      data = await safeJson(res)
+      ;({ res, data } = await fetchJsonT(
+        API + '/api/generate-decor/result?id=' + encodeURIComponent(jobId),
+        {},
+        20000
+      ))
     } catch (e) {
       if (++netErrors > 6) throw new Error('Connexion interrompue pendant la génération.')
       continue
@@ -423,12 +465,20 @@ function openInsertOverlay() {
   $('#insertStartActions').classList.remove('hidden') // "Insérer mon œuvre" + option haute fidélité
 }
 async function callInsertJob(body) {
-  const startRes = await fetch(API + '/api/insert-artwork', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const startData = await safeJson(startRes)
+  let startRes, startData
+  try {
+    ;({ res: startRes, data: startData } = await fetchJsonT(
+      API + '/api/insert-artwork',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      90000
+    ))
+  } catch (e) {
+    throw new Error(
+      e.name === 'AbortError'
+        ? 'Le service met trop de temps à démarrer. Réessaye.'
+        : 'Connexion au serveur impossible.'
+    )
+  }
   const jobId = startData.data && startData.data.jobId
   if (!startRes.ok || !startData.success || !jobId) {
     throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
@@ -441,8 +491,11 @@ async function callInsertJob(body) {
     await sleep(3000)
     let res, data
     try {
-      res = await fetch(API + '/api/insert-artwork/result?id=' + encodeURIComponent(jobId))
-      data = await safeJson(res)
+      ;({ res, data } = await fetchJsonT(
+        API + '/api/insert-artwork/result?id=' + encodeURIComponent(jobId),
+        {},
+        20000
+      ))
     } catch (e) {
       if (++netErrors > 6) throw new Error('Connexion interrompue pendant l’insertion.')
       continue
@@ -519,12 +572,20 @@ function showCleanLoading(msg) {
   $('#cleanStartActions').classList.add('hidden')
 }
 async function callCleanJob(body) {
-  const startRes = await fetch(API + '/api/clean-mockup', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  const startData = await safeJson(startRes)
+  let startRes, startData
+  try {
+    ;({ res: startRes, data: startData } = await fetchJsonT(
+      API + '/api/clean-mockup',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      90000
+    ))
+  } catch (e) {
+    throw new Error(
+      e.name === 'AbortError'
+        ? 'Le service met trop de temps à démarrer. Réessaye.'
+        : 'Connexion au serveur impossible.'
+    )
+  }
   const jobId = startData.data && startData.data.jobId
   if (!startRes.ok || !startData.success || !jobId) {
     throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
@@ -537,8 +598,11 @@ async function callCleanJob(body) {
     await sleep(3000)
     let res, data
     try {
-      res = await fetch(API + '/api/clean-mockup/result?id=' + encodeURIComponent(jobId))
-      data = await safeJson(res)
+      ;({ res, data } = await fetchJsonT(
+        API + '/api/clean-mockup/result?id=' + encodeURIComponent(jobId),
+        {},
+        20000
+      ))
     } catch (e) {
       if (++netErrors > 6) throw new Error('Connexion interrompue pendant le nettoyage.')
       continue
