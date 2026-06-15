@@ -1984,9 +1984,17 @@ function onCtxOutsidePointer(e) {
   if (e.target.closest('#ctxMenu')) return
   closeContextMenu()
 }
+// Un défilement HORIZONTAL d'un carrousel de mockups (.mockup-row) est anodin : il ne doit PAS
+// refermer le menu. Sinon, au bord gauche (1re vignette, scrollLeft=0), le snap-back du carrousel
+// émet un 'scroll' qui referme le menu aussitôt ouvert (constaté sur mobile). Un vrai scroll de page ferme.
+function onCtxScroll(e) {
+  const t = e.target
+  if (t && t.closest && t.closest('.mockup-row')) return
+  closeContextMenu()
+}
 function closeContextMenu() {
   document.removeEventListener('pointerdown', onCtxOutsidePointer, true)
-  document.removeEventListener('scroll', closeContextMenu, true)
+  document.removeEventListener('scroll', onCtxScroll, true)
   window.removeEventListener('resize', closeContextMenu)
   if (!ctxOpen) return
   ctxMenu.classList.add('hidden')
@@ -2014,7 +2022,7 @@ function openContextMenu(x, y, items) {
   // listeners de fermeture armés SEULEMENT une fois le menu ouvert (l'ouverture ne génère ni
   // scroll ni resize : pas d'auto-fermeture). Ils sont retirés dans closeContextMenu().
   document.addEventListener('pointerdown', onCtxOutsidePointer, true)
-  document.addEventListener('scroll', closeContextMenu, true)
+  document.addEventListener('scroll', onCtxScroll, true)
   window.addEventListener('resize', closeContextMenu)
 }
 
