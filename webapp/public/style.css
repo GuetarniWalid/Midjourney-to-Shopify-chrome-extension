@@ -205,6 +205,7 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .results-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr));gap:var(--s4)}
 .result-cell{position:relative;min-width:0;border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--border);
   background:var(--surface-2);aspect-ratio:.8;cursor:grab;touch-action:pan-y; /* AU REPOS : scroll vertical natif de la page */
+  user-select:none;-webkit-user-select:none;-webkit-touch-callout:none; /* pas de sélection bleue quand on glisse à la souris */
   transition:transform var(--dur-ui) var(--ease-std),box-shadow var(--dur-ui) var(--ease-std)}
 /* Pendant un réordonnancement : plus de scroll natif sur les cellules (ceinture+bretelles avec le
    preventDefault du touchmove) + promotion en couche GPU le temps du glisser. */
