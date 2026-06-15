@@ -28,6 +28,29 @@ const ROOM_LABELS = {
 }
 const roomLabelOf = (rt) => ROOM_LABELS[rt] || 'Autre'
 
+/* ---------- Sections personnalisées (ré-étiquetage NON destructif des mockups) ----------
+   On range un mockup dans une autre section sans toucher au disque : un PSD reçoit une étiquette
+   keyée par son sous-dossier (suit toutes les orientations) ; un décor IA reçoit un champ `section`.
+   Le libellé prime sur le défaut (dossier disque pour un PSD, pièce/« Autre » pour un décor IA). */
+// Sentence-case : 1re lettre en majuscule, le reste tel quel (colle aux libellés ROOM_LABELS,
+// ex. « Salle à manger »). Espaces multiples compactés.
+function normalizeSection(raw) {
+  const s = String(raw || '').replace(/\s+/g, ' ').trim()
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''
+}
+// Fusion insensible à la casse : si le nom saisi correspond (casse ignorée) à une section déjà
+// présente, on réutilise SON libellé exact (pas de doublon « Chambre » / « chambre »).
+function resolveSection(raw, existing) {
+  const norm = normalizeSection(raw)
+  if (!norm) return ''
+  const low = norm.toLocaleLowerCase('fr')
+  return (existing || []).find((e) => e.toLocaleLowerCase('fr') === low) || norm
+}
+// Sous-dossier d'un PSD = clé d'étiquette stable (commune aux orientations) : .../sous-cat/file.psd -> .../sous-cat
+const subfolderOf = (psdUrl) => String(psdUrl || '').slice(0, String(psdUrl || '').lastIndexOf('/'))
+// Section affichée d'un PSD : override si présent, sinon son dossier catégorie (défaut disque).
+const sectionForPsd = (psdUrl, fallback) => state.sectionOverrides[subfolderOf(psdUrl)] || fallback
+
 const state = {
   imageDataUrl: null, // l'oeuvre uploadée (dataURL)
   orientation: null, // 'portrait' | 'landscape' | 'square'
@@ -37,6 +60,7 @@ const state = {
   templates: [], // catégories scannées
   results: [], // [{id, url, context, label}]
   saved: { photopea: [], ai: [] }, // templates sauvegardés "pour toujours"
+  sectionOverrides: {}, // { "<sous-dossier PSD>": "<Libellé>" } — ré-étiquetage des mockups PSD
   favPsds: new Set(), // chemins PSD favoris (pour l'état des étoiles)
   lastBatchImage: null, // dernière œuvre pour laquelle les favoris ont été appliqués auto
   batchToken: null, // jeton du lot de favoris courant (sert à annuler un lot devenu périmé)
@@ -652,6 +676,7 @@ async function runCleanGenerate() {
     // Métadonnées figées AU MOMENT du nettoyage (pas de dérive si on change de type ensuite).
     lastClean = { image, product, orientation: state.orientation }
     $('#cleanImg').src = image
+    fillCleanSectionSelect() // choix de la section dès l'enregistrement (sinon « Autre » par défaut)
     $('#cleanLoading').classList.add('hidden')
     $('#cleanResult').classList.remove('hidden')
     $('#cleanActions').classList.remove('hidden')
@@ -662,6 +687,27 @@ async function runCleanGenerate() {
     toast('Mockup : ' + e.message, 'err')
   }
 }
+// Remplit le sélecteur de section de l'overlay de nettoyage : « Autre » (défaut = aucune étiquette),
+// les sections présentes dans la grille, puis « ＋ Nouvelle section… » (révèle un champ texte).
+function fillCleanSectionSelect() {
+  const sel = $('#cleanSection')
+  if (!sel) return
+  const labels = ['Autre', ...gridSectionLabels().filter((l) => l !== 'Autre')]
+  sel.innerHTML =
+    labels.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join('') +
+    '<option value="__new__">＋ Nouvelle section…</option>'
+  sel.value = 'Autre'
+  $('#cleanSectionNew').classList.add('hidden')
+  $('#cleanSectionNew').value = ''
+}
+// Section choisie au nettoyage : « Autre » -> null (pas d'étiquette) ; « __new__ » -> champ normalisé+fusionné.
+function cleanChosenSection() {
+  const sel = $('#cleanSection')
+  if (!sel) return null
+  if (sel.value === '__new__') return resolveSection($('#cleanSectionNew').value, gridSectionLabels()) || null
+  return sel.value && sel.value !== 'Autre' ? sel.value : null
+}
+
 // Enregistre le mockup nettoyé dans les templates — même rayon que les décors IA (l'origine
 // n'est qu'une métadonnée interne, aucun badge en galerie).
 async function saveCleanedMockup() {
@@ -678,6 +724,7 @@ async function saveCleanedMockup() {
         orientation: lastClean.orientation,
         theme: 'Mockup importé',
         roomType: null,
+        section: cleanChosenSection(),
         origin: 'upload',
       }),
     })
@@ -695,6 +742,9 @@ $('#mockupUploadBtn').addEventListener('click', openCleanOverlay)
 $('#cleanGenerate').addEventListener('click', runCleanGenerate)
 $('#cleanRegen').addEventListener('click', runCleanGenerate)
 $('#cleanSave').addEventListener('click', saveCleanedMockup)
+$('#cleanSection').addEventListener('change', () => {
+  $('#cleanSectionNew').classList.toggle('hidden', $('#cleanSection').value !== '__new__')
+})
 $('#cleanCancel').addEventListener('click', () => {
   $('#cleanOverlay').classList.add('hidden')
   cleanSrc = null
@@ -1168,6 +1218,19 @@ const STAR_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.6l2
 const favStarHtml = (on) =>
   on ? `<span class="mc-fav-badge" title="Favori — appliqué automatiquement à votre œuvre" aria-label="Favori">${STAR_SVG}</span>` : ''
 
+// Libellés des sections actuellement présentes dans la grille (PSD + décors IA compatibles), triés
+// comme la grille (« Autre » en dernier). Sert au sélecteur « Ranger dans… » et au choix au nettoyage.
+function gridSectionLabels() {
+  const ori = state.orientation
+  const set = new Set()
+  for (const cat of state.templates)
+    for (const sub of cat.subcategories)
+      if (sub.layouts[ori]) set.add(sectionForPsd(sub.layouts[ori].psd, cat.name))
+  for (const t of state.saved.ai.filter((t) => !t.product || PRODUCT_TO_TYPE[t.product] === state.productType))
+    set.add(t.section || roomLabelOf(t.roomType))
+  return [...set].sort((a, b) => (a === 'Autre') - (b === 'Autre') || a.localeCompare(b, 'fr'))
+}
+
 // Section « Mockups » UNIFIÉE : catalogue Photopea + décors enregistrés (IA générés OU photos
 // importées nettoyées — traités pareil), regroupés PAR PIÈCE. Seul le badge PS (Photoshop)
 // subsiste ; l'étoile marque un favori (rendu auto quand l'image est prête).
@@ -1191,11 +1254,11 @@ function renderMockups() {
   for (const cat of state.templates) {
     for (const sub of cat.subcategories) {
       const L = sub.layouts[ori]
-      if (L) push(cat.name, { kind: 'photopea', cat, sub, L })
+      if (L) push(sectionForPsd(L.psd, cat.name), { kind: 'photopea', cat, sub, L })
     }
   }
   for (const t of state.saved.ai.filter((t) => !t.product || PRODUCT_TO_TYPE[t.product] === state.productType)) {
-    push(roomLabelOf(t.roomType), { kind: 'ai', data: t })
+    push(t.section || roomLabelOf(t.roomType), { kind: 'ai', data: t })
   }
   const rooms = Object.keys(groups).sort((a, b) => (a === 'Autre') - (b === 'Autre') || a.localeCompare(b, 'fr'))
   let count = 0
@@ -1235,6 +1298,7 @@ function buildMockupCell(e, ori) {
       const favInfo = { type: state.productType, category: cat.name, subName: sub.name, psd: L.psd, preview: L.preview || null, orientation: ori, context: sub.context || `${cat.name} - ${sub.name}` }
       return [
         { label: fav ? '★ Retirer des favoris' : '★ Ajouter aux favoris', onClick: () => toggleFavorite(favInfo) },
+        { label: '📁 Ranger dans une section…', onClick: () => openSectionPicker({ kind: 'photopea', subfolder: subfolderOf(L.psd), current: sectionForPsd(L.psd, cat.name), origin: cat.name, name: sub.name }) },
         { label: '🗑 Supprimer du disque', danger: true, onClick: () => deleteMockup({ psd: L.psd, preview: L.preview || null, name: sub.name }) },
       ]
     })
@@ -1251,6 +1315,7 @@ function buildMockupCell(e, ori) {
     })
     attachLongPress(cell, () => [
       { label: t.favorite ? '★ Retirer des favoris' : '★ Ajouter aux favoris', onClick: () => toggleAiFavorite(t) },
+      { label: '📁 Ranger dans une section…', onClick: () => openSectionPicker({ kind: 'ai', id: t.id, current: t.section || roomLabelOf(t.roomType), origin: roomLabelOf(t.roomType), name: t.theme || 'Décor IA' }) },
       { label: '🗑 Supprimer', danger: true, onClick: () => deleteSaved('ai', t.id) },
     ])
   }
@@ -1322,8 +1387,10 @@ async function loadSavedTemplates() {
     const r = await fetch(RENDER + '/api/saved-templates')
     const data = await r.json()
     state.saved = { photopea: data.photopea || [], ai: data.ai || [] }
+    state.sectionOverrides = data.sectionOverrides || {}
   } catch {
     state.saved = { photopea: [], ai: [] }
+    state.sectionOverrides = {}
   }
   state.favPsds = new Set(state.saved.photopea.map((t) => t.psd))
   renderMockups() // catalogue Photopea + décors IA + état des favoris
@@ -1450,6 +1517,74 @@ async function toggleAiFavorite(t) {
     toast('Erreur : ' + e.message, 'err')
   }
 }
+
+/* ---------- Ranger un mockup dans une section (ré-étiquetage non destructif) ---------- */
+// Cible courante du sélecteur : { kind:'photopea'|'ai', subfolder?|id?, current, origin, name }.
+let sectionTarget = null
+function openSectionPicker(target) {
+  sectionTarget = target
+  $('#sectionPickerName').textContent = target.name ? `« ${target.name} »` : ''
+  // Candidats : sections présentes dans la grille + la section d'ORIGINE du mockup (pour réinitialiser).
+  const labels = gridSectionLabels()
+  if (!labels.includes(target.origin)) labels.push(target.origin)
+  labels.sort((a, b) => (a === 'Autre') - (b === 'Autre') || a.localeCompare(b, 'fr'))
+  const list = $('#sectionList')
+  list.innerHTML = ''
+  for (const label of labels) {
+    const isCurrent = label === target.current
+    const isOrigin = label === target.origin
+    const b = document.createElement('button')
+    b.className = 'section-opt' + (isCurrent ? ' current' : '')
+    b.disabled = isCurrent
+    const tag = isOrigin ? ' · origine' : ''
+    b.innerHTML = `<span>${escapeHtml(label)}${tag}</span>${isCurrent ? '<span class="section-check">✓</span>' : ''}`
+    b.addEventListener('click', () => applySection(label))
+    list.appendChild(b)
+  }
+  $('#sectionNewInput').value = ''
+  $('#sectionOverlay').classList.remove('hidden')
+}
+function closeSectionPicker() {
+  $('#sectionOverlay').classList.add('hidden')
+  sectionTarget = null
+}
+// Applique le rangement. Choisir la section d'ORIGINE efface l'étiquette (retour au défaut).
+async function applySection(label) {
+  if (!sectionTarget) return
+  const t = sectionTarget
+  const section = label === t.origin ? null : label
+  try {
+    if (t.kind === 'ai') {
+      const r = await fetch(RENDER + '/api/saved-templates/ai/' + t.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ section }),
+      })
+      if (!r.ok) throw new Error('échec')
+    } else {
+      const r = await fetch(RENDER + '/api/mockup-section', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subfolder: t.subfolder, section }),
+      })
+      if (!r.ok) throw new Error('échec')
+    }
+    closeSectionPicker()
+    toast(section ? `Rangé dans « ${label} » ✓` : "Remis dans sa section d'origine ✓", 'ok')
+    await loadSavedTemplates() // recharge overrides + décors -> renderMockups()
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'err')
+  }
+}
+$('#sectionNewAdd').addEventListener('click', () => {
+  const labels = gridSectionLabels()
+  if (sectionTarget && !labels.includes(sectionTarget.origin)) labels.push(sectionTarget.origin)
+  const resolved = resolveSection($('#sectionNewInput').value, labels)
+  if (!resolved) return toast('Saisissez un nom de section', 'err')
+  applySection(resolved)
+})
+$('#sectionNewInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#sectionNewAdd').click() })
+$('#sectionCancel').addEventListener('click', closeSectionPicker)
 
 /* ---------- Favoris automatiques ---------- */
 // Dès que l'image est au bon format, on applique l'œuvre à TOUS les favoris, en un lot, une

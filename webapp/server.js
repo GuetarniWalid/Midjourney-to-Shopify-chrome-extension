@@ -188,7 +188,7 @@ async function readSaved() {
   try {
     raw = await fsp.readFile(SAVED_DB, 'utf8');
   } catch (e) {
-    if (e.code === 'ENOENT') return { photopea: [], ai: [] };
+    if (e.code === 'ENOENT') return { photopea: [], ai: [], sectionOverrides: {} };
     throw e;
   }
   let db;
@@ -197,7 +197,12 @@ async function readSaved() {
   } catch (e) {
     throw new Error('templates.json illisible (corrompu) — écriture annulée pour préserver les données : ' + e.message);
   }
-  return { photopea: Array.isArray(db.photopea) ? db.photopea : [], ai: Array.isArray(db.ai) ? db.ai : [] };
+  // sectionOverrides : map { "<sous-dossier PSD>": "<Libellé section>" } — ré-étiquetage non
+  // destructif des mockups PSD (le disque ne bouge pas). IMPORTANT : on la reconstruit ici, sinon
+  // mutateSaved réécrit l'objet renvoyé et l'effacerait au prochain write.
+  const so = db.sectionOverrides && typeof db.sectionOverrides === 'object' && !Array.isArray(db.sectionOverrides)
+    ? db.sectionOverrides : {};
+  return { photopea: Array.isArray(db.photopea) ? db.photopea : [], ai: Array.isArray(db.ai) ? db.ai : [], sectionOverrides: so };
 }
 // Applique une mutation (fn reçoit la db, la modifie, retourne une valeur) de façon sérialisée.
 function mutateSaved(fn) {
@@ -217,7 +222,7 @@ app.get('/api/saved-templates', async (req, res) => {
   try {
     const db = await readSaved();
     const ai = db.ai.map((t) => ({ ...t, url: '/saved/' + encodeURIComponent(t.file) }));
-    res.json({ success: true, photopea: db.photopea, ai });
+    res.json({ success: true, photopea: db.photopea, ai, sectionOverrides: db.sectionOverrides || {} });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 
@@ -245,7 +250,7 @@ app.post('/api/saved-templates/photopea', async (req, res) => {
 // Sauvegarde un décor IA vierge : écrit l'image sur disque puis enregistre sa fiche.
 app.post('/api/saved-templates/ai', async (req, res) => {
   try {
-    const { image, product, orientation, theme, roomType, origin } = req.body || {};
+    const { image, product, orientation, theme, roomType, origin, section } = req.body || {};
     if (!image || !image.startsWith('data:')) return res.status(400).json({ success: false, error: 'image (dataURL) requise' });
     const m = image.match(/^data:([^;]+);base64,(.*)$/);
     if (!m) return res.status(400).json({ success: false, error: 'dataURL invalide' });
@@ -262,6 +267,7 @@ app.post('/api/saved-templates/ai', async (req, res) => {
           id: newId('ai_'), file, product: product || 'canvas',
           orientation: orientation || null, theme: theme || null,
           roomType: roomType || null, // pièce choisie au dropdown -> regroupement par pièce dans l'UI
+          section: (typeof section === 'string' && section.trim()) ? section.trim() : null, // override de section affichée (prioritaire sur roomType) ; null = retombe sur roomType/Autre
           origin: origin === 'upload' ? 'upload' : null, // provenance interne (debug) : 'upload' = photo importée nettoyée, null = décor généré
           savedAt: new Date().toISOString(),
         };
@@ -278,18 +284,45 @@ app.post('/api/saved-templates/ai', async (req, res) => {
 
 // Bascule le flag "favori" d'un décor IA. Favori = l'œuvre y est insérée automatiquement
 // (en lot) dès qu'elle est au bon format, au même titre que les mockups Photopea favoris.
+// Met à jour un décor IA : `favorite` (insertion auto en lot) et/ou `section` (libellé de section
+// affichée — override, prioritaire sur roomType ; '' ou null efface l'override -> retombe sur Autre).
+// On ne touche QUE les clés présentes dans le corps (pas de réinitialisation involontaire de l'autre).
 app.patch('/api/saved-templates/ai/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const favorite = !!(req.body && req.body.favorite);
+    const body = req.body || {};
     const updated = await mutateSaved((db) => {
       const rec = db.ai.find((t) => t.id === id);
       if (!rec) return null;
-      rec.favorite = favorite;
+      if ('favorite' in body) rec.favorite = !!body.favorite;
+      if ('section' in body) {
+        const s = typeof body.section === 'string' ? body.section.trim() : '';
+        rec.section = s || null;
+      }
       return rec;
     });
     if (!updated) return res.status(404).json({ success: false, error: 'introuvable' });
-    res.json({ success: true, favorite: updated.favorite });
+    res.json({ success: true, favorite: !!updated.favorite, section: updated.section || null });
+  } catch (e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+// Étiquette de section d'un mockup PSD (ré-étiquetage NON destructif : le fichier ne bouge pas du
+// disque). Body { subfolder: "/mockups/<type>/<cat>/<sous-cat>", section: "Libellé"|null }.
+// La clé est le sous-dossier -> l'étiquette suit toutes les orientations du même mockup.
+// section vide/null = on efface l'override (le mockup retombe dans son dossier disque d'origine).
+app.put('/api/mockup-section', async (req, res) => {
+  try {
+    const { subfolder, section } = req.body || {};
+    if (!subfolder || typeof subfolder !== 'string' || !subfolder.startsWith('/mockups/'))
+      return res.status(400).json({ success: false, error: 'subfolder invalide' });
+    const label = (typeof section === 'string' && section.trim()) ? section.trim() : null;
+    const overrides = await mutateSaved((db) => {
+      if (!db.sectionOverrides || typeof db.sectionOverrides !== 'object') db.sectionOverrides = {};
+      if (label) db.sectionOverrides[subfolder] = label;
+      else delete db.sectionOverrides[subfolder];
+      return db.sectionOverrides;
+    });
+    res.json({ success: true, sectionOverrides: overrides });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 

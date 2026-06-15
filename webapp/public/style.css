@@ -251,6 +251,19 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .ctx-item.danger{color:var(--danger)}
 .ctx-item.danger:hover,.ctx-item.danger:active{background:var(--danger-weak)}
 
+/* ---- sélecteur de section (ranger un mockup) ---- */
+.section-list{display:flex;flex-direction:column;gap:4px;max-height:46vh;overflow:auto;margin-bottom:var(--s3)}
+.section-opt{display:flex;align-items:center;justify-content:space-between;gap:var(--s2);width:100%;min-height:46px;
+  text-align:left;padding:11px 14px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--surface);
+  color:var(--text);font:600 15px/1.4 inherit;cursor:pointer}
+.section-opt:hover{background:var(--accent-weak);border-color:transparent;color:var(--accent-text)}
+.section-opt.current{background:var(--accent-weak);border-color:var(--accent);color:var(--accent-text);cursor:default}
+.section-check{font-size:14px}
+.section-new{display:flex;flex-direction:column;gap:var(--s2);margin-bottom:var(--s2)}
+.section-new .ghost-btn{margin-top:0}
+.section-inline{display:flex;flex-direction:column;gap:var(--s2);margin-bottom:var(--s3);text-align:left}
+.section-inline label{font-size:13px;font-weight:600;color:var(--muted)}
+
 /* ---- toast ---- */
 .toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:60;
   background:var(--text);color:#fff;padding:12px 16px;border-radius:var(--r-md);box-shadow:var(--shadow-md);font-size:14px;font-weight:500;max-width:90%;

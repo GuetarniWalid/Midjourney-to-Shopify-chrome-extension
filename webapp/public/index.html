@@ -230,10 +230,31 @@
         <button id="cleanCancel" class="ghost-btn">Annuler</button>
       </div>
       <div id="cleanActions" class="resize-actions hidden">
+        <div class="section-inline">
+          <label for="cleanSection">Ranger dans :</label>
+          <select id="cleanSection" class="decor-vibe"></select>
+          <input id="cleanSectionNew" class="decor-vibe hidden" type="text" maxlength="40" placeholder="Nom de la nouvelle section">
+        </div>
         <button id="cleanValidate" class="primary-btn">Utiliser ce mockup</button>
         <button id="cleanSave" class="ghost-btn">★ Enregistrer ce mockup</button>
         <button id="cleanRegen" class="ghost-btn">Renettoyer</button>
         <button id="cleanClose" class="ghost-btn">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay « Ranger dans une section » (appui long sur un mockup) -->
+  <div id="sectionOverlay" class="resize-overlay hidden">
+    <div class="resize-card">
+      <h3>Ranger dans une section</h3>
+      <p id="sectionPickerName" class="card-note"></p>
+      <div id="sectionList" class="section-list"></div>
+      <div class="section-new">
+        <input id="sectionNewInput" class="decor-vibe" type="text" maxlength="40" placeholder="Nouvelle section… (ex. Chambre)">
+        <button id="sectionNewAdd" class="ghost-btn">Créer et ranger ici</button>
+      </div>
+      <div class="resize-actions">
+        <button id="sectionCancel" class="ghost-btn">Annuler</button>
       </div>
     </div>
   </div>
