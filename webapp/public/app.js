@@ -1263,14 +1263,21 @@ function renderMockups() {
   const rooms = Object.keys(groups).sort((a, b) => (a === 'Autre') - (b === 'Autre') || a.localeCompare(b, 'fr'))
   let count = 0
   for (const room of rooms) {
+    const section = document.createElement('div')
+    section.className = 'mockup-section'
     const head = document.createElement('div')
     head.className = 'mockup-cat'
     head.textContent = room
-    grid.appendChild(head)
+    section.appendChild(head)
+    // une section = une seule rangée défilable horizontalement (carrousel)
+    const row = document.createElement('div')
+    row.className = 'mockup-row'
     for (const e of groups[room]) {
-      grid.appendChild(buildMockupCell(e, ori))
+      row.appendChild(buildMockupCell(e, ori))
       count++
     }
+    section.appendChild(row)
+    grid.appendChild(section)
   }
   if (state.needsResize) {
     hint.textContent = "⚠️ Retaillez l'image au bon format pour débloquer les mockups"
