@@ -1497,6 +1497,7 @@ async function generateTwin(res) {
         target: state.orientation,
         product: productOf(state.productType),
         fidelity: res.fidelity || 'standard',
+        mat: true, // l'œuvre est déjà mat-ée -> prompt backend qui PRÉSERVE la marge blanche
       })
       twin = { url: img, path: null }
     }
