@@ -1469,13 +1469,14 @@ function dropTwinFile(pp) {
   if (pp && pp.path) fetch(RENDER + '/api/upload/' + pp.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
 }
 // (Re)génère le jumeau passe-partout d'un rendu source, via le MÊME moteur (PSD ou décor IA),
-// en réinjectant l'œuvre mat-ée. Écrit sur res.pp.
+// en réinjectant l'œuvre mat-ée. Écrit sur res.pp. Ne re-rend QUE la 2e rangée (renderPpRow) :
+// le rendu normal du haut ne change pas -> n'interrompt pas un éventuel glisser en cours.
 async function generateTwin(res) {
   if (!ppEligible() || res.kept || !res.psd === !res.decor) return // ni source PSD ni décor IA -> pas de jumeau
   if (res.pp && res.pp.optedOut) return
-  dropTwinFile(res.pp) // un éventuel ancien jumeau (re-roll) -> on nettoie son fichier
+  dropTwinFile(res.pp) // filet de sécurité (le re-roll nettoie déjà via rerollTwin)
   res.pp = { busy: true }
-  renderResults()
+  renderPpRow()
   try {
     const matted = await getMattedOeuvre()
     if (!matted) throw new Error('œuvre indisponible')
@@ -1508,7 +1509,7 @@ async function generateTwin(res) {
     if (state.results.includes(res)) res.pp = { busy: false, error: true }
     toast('Passe-partout : ' + e.message, 'err')
   }
-  renderResults()
+  renderPpRow()
   refreshAction()
 }
 // File d'attente : génère les jumeaux EN ARRIÈRE-PLAN, un par un (n'embouteille pas le lot de
@@ -1518,6 +1519,14 @@ function queueTwin(res) {
   if (!ppEligible() || res.kept) return
   twinQueue = twinQueue.then(() => generateTwin(res)).catch(() => {})
 }
+// Re-roll : on supprime le fichier de l'ANCIEN jumeau AVANT d'écraser res.pp (sinon son chemin
+// est perdu et le fichier temp serveur fuite à chaque re-roll PSD), puis on relance.
+function rerollTwin(res) {
+  dropTwinFile(res.pp)
+  res.pp = { busy: true }
+  renderPpRow()
+  queueTwin(res)
+}
 // Active/désactive le passe-partout d'un rendu (opt-out par mockup).
 function toggleTwin(id) {
   const res = state.results.find((r) => r.id === id)
@@ -1525,10 +1534,11 @@ function toggleTwin(id) {
   if (res.pp && !res.pp.optedOut) {
     dropTwinFile(res.pp)
     res.pp = { optedOut: true }
-    renderResults()
+    renderPpRow()
     refreshAction()
   } else {
     res.pp = { busy: true }
+    renderPpRow() // affiche le spinner tout de suite -> le bouton « Réactiver » disparaît (anti double-clic)
     queueTwin(res)
   }
 }
@@ -1845,41 +1855,65 @@ function renderResults() {
     cell.innerHTML =
       `<div class="num">${i + 1}</div>` +
       (IS_REIMAGE && !res.kept ? '<span class="new-badge">nouveau</span>' : '') +
-      `<button class="del" title="Supprimer">✕</button><img src="${res.url}" alt="" draggable="false">` +
-      ppStripHtml(res)
+      `<button class="del" title="Supprimer">✕</button><img src="${res.url}" alt="" draggable="false">`
     cell.querySelector('.del').addEventListener('click', (ev) => {
       ev.stopPropagation()
       removeResult(res.id)
     })
-    wirePpStrip(cell, res)
     attachDrag(cell, res)
     grid.appendChild(cell)
   })
+  renderPpRow()
 }
-// Bandeau passe-partout (poster) : aperçu du jumeau + re-roll + activation/désactivation.
-// Overlay absolu -> n'entre PAS dans la géométrie du drag (qui itère grid.children).
-function ppStripHtml(res) {
-  if (!ppEligible() || res.kept) return ''
+// 2e rangée « passe-partout » (poster) : les jumeaux EN GRAND (même taille que les rendus du
+// haut), cliquables -> lightbox pour les analyser, avec re-roll + désactivation. Grille SÉPARÉE
+// (#ppGrid) : aucune interaction avec le drag du haut (qui n'itère que #resultsGrid). Même numéro
+// que le rendu source pour la correspondance haut/bas.
+function renderPpRow() {
+  const section = $('#ppSection'),
+    grid = $('#ppGrid')
+  if (!section || !grid) return
+  grid.innerHTML = ''
+  const show = ppEligible() && state.results.some((r) => !r.kept)
+  section.classList.toggle('hidden', !show)
+  if (!show) return
+  state.results.forEach((res, i) => {
+    if (res.kept) return
+    grid.appendChild(buildPpCell(res, i + 1))
+  })
+}
+function buildPpCell(res, num) {
   const pp = res.pp
-  if (pp && pp.busy) return `<div class="pp-strip"><span class="pp-spin"></span>passe-partout…</div>`
-  if (pp && pp.optedOut)
-    return `<div class="pp-strip off"><span>sans passe-partout</span><button class="pp-act pp-on" title="Ajouter le passe-partout">+</button></div>`
-  if (pp && pp.error)
-    return `<div class="pp-strip err"><span>passe-partout échoué</span><button class="pp-act pp-reroll" title="Réessayer">↻</button></div>`
-  if (pp && pp.url)
-    return `<div class="pp-strip"><img class="pp-thumb" src="${pp.url}" alt="" draggable="false"><span>passe-partout</span><button class="pp-act pp-reroll" title="Régénérer">↻</button><button class="pp-act pp-offbtn" title="Retirer">✕</button></div>`
-  return '' // pas encore généré (sera mis en file) ou source non re-rendable
-}
-function wirePpStrip(cell, res) {
-  const strip = cell.querySelector('.pp-strip')
-  if (!strip) return
-  strip.addEventListener('pointerdown', (ev) => ev.stopPropagation()) // n'arme pas le drag
-  const thumb = strip.querySelector('.pp-thumb')
-  if (thumb) thumb.addEventListener('click', (ev) => { ev.stopPropagation(); openLightbox(res.pp.url) })
-  const reroll = strip.querySelector('.pp-reroll')
-  if (reroll) reroll.addEventListener('click', (ev) => { ev.stopPropagation(); res.pp = { busy: true }; renderResults(); queueTwin(res) })
-  const toggle = strip.querySelector('.pp-on, .pp-offbtn')
-  if (toggle) toggle.addEventListener('click', (ev) => { ev.stopPropagation(); toggleTwin(res.id) })
+  const cell = document.createElement('div')
+  cell.className = 'result-cell pp-cell'
+  const numHtml = `<div class="num">${num}</div>`
+  if (pp && pp.optedOut) {
+    cell.classList.add('pp-muted')
+    cell.innerHTML = numHtml + `<div class="pp-msg">Passe-partout désactivé<button class="pp-act pp-reactivate">Réactiver</button></div>`
+    cell.querySelector('.pp-reactivate').addEventListener('click', (ev) => { ev.stopPropagation(); toggleTwin(res.id) })
+    return cell
+  }
+  if (pp && pp.error) {
+    cell.classList.add('pp-muted')
+    cell.innerHTML = numHtml + `<div class="pp-msg">Échec du passe-partout<button class="pp-act pp-reroll">↻ Réessayer</button></div>`
+    cell.querySelector('.pp-reroll').addEventListener('click', (ev) => { ev.stopPropagation(); rerollTwin(res) })
+    return cell
+  }
+  if (pp && pp.url) {
+    cell.innerHTML =
+      numHtml +
+      `<button class="del pp-disable" title="Désactiver le passe-partout">✕</button>` +
+      `<button class="pp-reroll-btn" title="Régénérer">↻</button>` +
+      `<img src="${pp.url}" alt="" draggable="false"><span class="pp-zoom" title="Agrandir">⤢</span>`
+    cell.addEventListener('click', () => openLightbox(pp.url))
+    cell.querySelector('.pp-disable').addEventListener('click', (ev) => { ev.stopPropagation(); toggleTwin(res.id) })
+    cell.querySelector('.pp-reroll-btn').addEventListener('click', (ev) => { ev.stopPropagation(); rerollTwin(res) })
+    return cell
+  }
+  // busy (en cours) ou pas encore lancé (en file d'attente)
+  cell.classList.add('pp-loading')
+  cell.innerHTML = numHtml + `<div class="pp-msg"><span class="pp-spin big"></span>${pp && pp.busy ? 'Passe-partout…' : 'En attente…'}</div>`
+  return cell
 }
 function removeResult(id) {
   const res = state.results.find((r) => r.id === id)
