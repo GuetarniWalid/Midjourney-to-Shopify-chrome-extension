@@ -58,7 +58,11 @@ const state = {
   collections: [],
   collection: null, // {id, title}
   templates: [], // catégories scannées
-  results: [], // [{id, url, context, label}]
+  // [{id, url, context, label, psd?|decor?+fidelity?, pp?:{url,path,busy,error,optedOut}}]
+  // psd/decor : paramètres de rendu retenus pour re-générer le JUMEAU passe-partout (poster).
+  results: [],
+  mattedOeuvre: null, // œuvre avec passe-partout (dataURL), cache
+  mattedOeuvreSrc: null, // source ayant servi au cache ci-dessus (invalidation si l'œuvre change)
   saved: { photopea: [], ai: [] }, // templates sauvegardés "pour toujours"
   sectionOverrides: {}, // { "<sous-dossier PSD>": "<Libellé>" } — ré-étiquetage des mockups PSD
   favPsds: new Set(), // chemins PSD favoris (pour l'état des étoiles)
@@ -473,6 +477,7 @@ $('#decorValidate').addEventListener('click', () => {
 
 /* ---------- Étape 2 : insertion de l'œuvre dans le décor validé (Nano Banana / Gemini) ---------- */
 let lastInsert = null // dernier rendu d'insertion (data URI) en attente de validation
+let lastInsertMeta = null // {decor, fidelity} du dernier rendu -> retenu pour le jumeau passe-partout
 function showInsertLoading(msg) {
   $('#insertLoading').classList.remove('hidden')
   $('#insertLoadingMsg').textContent = msg
@@ -544,6 +549,7 @@ async function runInsertGenerate() {
       product,
       fidelity,
     })
+    lastInsertMeta = { decor: state.decor, fidelity } // pour re-générer le jumeau passe-partout
     $('#insertImg').src = lastInsert
     $('#insertLoading').classList.add('hidden')
     $('#insertResult').classList.remove('hidden')
@@ -566,15 +572,19 @@ $('#insertClose').addEventListener('click', () => {
 // Valider le rendu final : il rejoint la galerie de rendus (publiable comme les mockups Photopea).
 $('#insertValidate').addEventListener('click', () => {
   if (!lastInsert) return
-  state.results.push({
+  const res = {
     id: 'ins' + Date.now() + Math.random().toString(36).slice(2, 5),
     path: null,
     url: lastInsert,
     context: 'Décor sur-mesure (IA)',
     label: 'Décor IA',
-  })
+    decor: lastInsertMeta && lastInsertMeta.decor, // retenus pour re-générer le jumeau passe-partout
+    fidelity: lastInsertMeta && lastInsertMeta.fidelity,
+  }
+  state.results.push(res)
   renderResults()
   refreshAction()
+  queueTwin(res)
   $('#insertOverlay').classList.add('hidden')
   lastInsert = null
   toast('Rendu ajouté ✓', 'ok')
@@ -799,8 +809,10 @@ $$('#productType .seg-btn').forEach((btn) =>
 function dropGeneratedResults() {
   state.batchToken = {} // périme un lot de favoris en vol
   for (const r of state.results)
-    if (!r.kept && r.path)
-      fetch(RENDER + '/api/upload/' + r.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
+    if (!r.kept) {
+      if (r.path) fetch(RENDER + '/api/upload/' + r.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
+      dropTwinFile(r.pp)
+    }
   state.results = state.results.filter((r) => r.kept)
   renderResults()
   refreshAction()
@@ -811,9 +823,12 @@ function clearResults() {
   state.publishKey = null // nouvelle session => nouvelle clé d'idempotence à la prochaine publication
   state.batchToken = {} // périme tout lot de favoris en cours -> ses écritures seront ignorées
   // seuls les rendus Photopea ont un fichier temp serveur (res.path) ; les rendus IA sont des data URI
-  for (const r of state.results)
+  for (const r of state.results) {
     if (r.path) fetch(RENDER + '/api/upload/' + r.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
+    dropTwinFile(r.pp)
+  }
   state.results = []
+  state.mattedOeuvre = state.mattedOeuvreSrc = null // l'œuvre va changer -> invalide le cache passe-partout
   renderResults()
   refreshAction()
 }
@@ -1356,15 +1371,18 @@ async function renderWithPsd({ psd, context, label }, cell) {
     })
     const data = await r.json()
     if (!data.success) throw new Error(data.error || 'échec du rendu')
-    state.results.push({
+    const res = {
       id: 'r' + Date.now() + Math.random().toString(36).slice(2, 5),
       path: data.url,
       url: renderUrl(data.url),
       context: data.mockupContext,
       label,
-    })
+      psd, // retenu pour re-générer le jumeau passe-partout (poster)
+    }
+    state.results.push(res)
     renderResults()
     refreshAction()
+    queueTwin(res)
     toast('Rendu ajouté ✓', 'ok')
   } catch (e) {
     toast('Erreur : ' + e.message, 'err')
@@ -1387,6 +1405,132 @@ async function urlToDataUrl(url) {
     fr.onerror = () => rej(new Error('lecture image échouée'))
     fr.readAsDataURL(blob)
   })
+}
+
+/* ---------- Passe-partout : jumeaux d'affiche (poster) ----------
+   Pour CHAQUE mockup d'un poster on publie un 2e visuel : le même décor mais avec l'œuvre
+   entourée d'une marge blanche (effet passe-partout). On re-rend le mockup avec une œuvre MAT-ÉE
+   (construite au canvas, sans IA) : MÊMES dimensions que l'œuvre (ratio conservé -> insertion
+   identique), bordure blanche ÉGALE en pixels sur les 4 côtés, œuvre rétrécie en COVER dans le
+   cadre intérieur (remplit bord à bord, léger rognage accepté). Le jumeau « monte » sur son
+   mockup source (res.pp) : lié 1:1, re-roll + désactivation possibles, supprimé avec lui. À la
+   publication, tous les jumeaux sont ajoutés EN FIN de tableau, dans l'ordre des mockups. */
+const PP_RATIO = 0.08 // bordure blanche = 8% du petit côté de l'œuvre (réglable)
+const ppEligible = () => state.productType === 'poster'
+
+function buildMattedOeuvre(srcDataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      const W = img.naturalWidth,
+        H = img.naturalHeight
+      const m = Math.round(PP_RATIO * Math.min(W, H))
+      const c = document.createElement('canvas')
+      c.width = W
+      c.height = H
+      const ctx = c.getContext('2d')
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, W, H)
+      const iw = W - 2 * m,
+        ih = H - 2 * m
+      // COVER : remplit (iw×ih) en gardant le ratio de l'œuvre, rogne le surplus (léger)
+      const scale = Math.max(iw / W, ih / H)
+      const dw = W * scale,
+        dh = H * scale
+      ctx.save()
+      ctx.beginPath()
+      ctx.rect(m, m, iw, ih)
+      ctx.clip()
+      ctx.drawImage(img, m + (iw - dw) / 2, m + (ih - dh) / 2, dw, dh)
+      ctx.restore()
+      resolve(c.toDataURL('image/jpeg', 0.92))
+    }
+    img.onerror = () => reject(new Error('œuvre illisible'))
+    img.src = srcDataUrl
+  })
+}
+// Source de l'œuvre (création : l'upload ; reimage : l'image n°2 figée du produit).
+async function oeuvreSourceDataUrl() {
+  if (state.imageDataUrl) return state.imageDataUrl
+  if (state.oeuvre && state.oeuvre.url) return await urlToDataUrl(state.oeuvre.url)
+  return null
+}
+// œuvre mat-ée, mise en cache (recalcul si l'œuvre change).
+async function getMattedOeuvre() {
+  const src = await oeuvreSourceDataUrl()
+  if (!src) return null
+  if (state.mattedOeuvre && state.mattedOeuvreSrc === src) return state.mattedOeuvre
+  state.mattedOeuvre = await buildMattedOeuvre(src)
+  state.mattedOeuvreSrc = src
+  return state.mattedOeuvre
+}
+// Supprime le fichier temp serveur d'un jumeau (rendus Photopea uniquement ; IA = data URI).
+function dropTwinFile(pp) {
+  if (pp && pp.path) fetch(RENDER + '/api/upload/' + pp.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
+}
+// (Re)génère le jumeau passe-partout d'un rendu source, via le MÊME moteur (PSD ou décor IA),
+// en réinjectant l'œuvre mat-ée. Écrit sur res.pp.
+async function generateTwin(res) {
+  if (!ppEligible() || res.kept || !res.psd === !res.decor) return // ni source PSD ni décor IA -> pas de jumeau
+  if (res.pp && res.pp.optedOut) return
+  dropTwinFile(res.pp) // un éventuel ancien jumeau (re-roll) -> on nettoie son fichier
+  res.pp = { busy: true }
+  renderResults()
+  try {
+    const matted = await getMattedOeuvre()
+    if (!matted) throw new Error('œuvre indisponible')
+    let twin
+    if (res.psd) {
+      const r = await fetch(RENDER + '/api/render', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ psd: res.psd, image: matted, mockupContext: res.context }),
+      })
+      const data = await r.json()
+      if (!data.success) throw new Error(data.error || 'échec du rendu')
+      twin = { url: renderUrl(data.url), path: data.url }
+    } else {
+      const img = await callInsertJob({
+        decor: res.decor,
+        artwork: matted,
+        target: state.orientation,
+        product: productOf(state.productType),
+        fidelity: res.fidelity || 'standard',
+      })
+      twin = { url: img, path: null }
+    }
+    if (!state.results.includes(res)) {
+      dropTwinFile(twin) // source supprimée entre-temps -> on jette le rendu
+      return
+    }
+    res.pp = { ...twin, busy: false, optedOut: false }
+  } catch (e) {
+    if (state.results.includes(res)) res.pp = { busy: false, error: true }
+    toast('Passe-partout : ' + e.message, 'err')
+  }
+  renderResults()
+  refreshAction()
+}
+// File d'attente : génère les jumeaux EN ARRIÈRE-PLAN, un par un (n'embouteille pas le lot de
+// favoris ni l'UI ; les insertions IA sont longues -> jamais en parallèle).
+let twinQueue = Promise.resolve()
+function queueTwin(res) {
+  if (!ppEligible() || res.kept) return
+  twinQueue = twinQueue.then(() => generateTwin(res)).catch(() => {})
+}
+// Active/désactive le passe-partout d'un rendu (opt-out par mockup).
+function toggleTwin(id) {
+  const res = state.results.find((r) => r.id === id)
+  if (!res) return
+  if (res.pp && !res.pp.optedOut) {
+    dropTwinFile(res.pp)
+    res.pp = { optedOut: true }
+    renderResults()
+    refreshAction()
+  } else {
+    res.pp = { busy: true }
+    queueTwin(res)
+  }
 }
 
 async function loadSavedTemplates() {
@@ -1630,6 +1774,7 @@ async function runFavoritesBatch() {
     state.results.push(res)
     renderResults()
     refreshAction()
+    queueTwin(res) // jumeau passe-partout en arrière-plan (poster)
     return true
   }
   tick()
@@ -1669,6 +1814,7 @@ async function renderFavoritePhotopea(pp, image) {
   return {
     id: 'r' + Date.now() + Math.random().toString(36).slice(2, 5),
     path: data.url, url: renderUrl(data.url), context: data.mockupContext, label: pp.subName || 'Mockup',
+    psd: pp.psd, // retenu pour le jumeau passe-partout
   }
 }
 async function insertFavoriteAi(ai, image, ori, product) {
@@ -1677,6 +1823,7 @@ async function insertFavoriteAi(ai, image, ori, product) {
   return {
     id: 'ins' + Date.now() + Math.random().toString(36).slice(2, 5),
     path: null, url: img, context: 'Décor sur-mesure (IA)', label: 'Décor IA',
+    decor, fidelity: 'standard', // retenus pour le jumeau passe-partout
   }
 }
 
@@ -1698,14 +1845,41 @@ function renderResults() {
     cell.innerHTML =
       `<div class="num">${i + 1}</div>` +
       (IS_REIMAGE && !res.kept ? '<span class="new-badge">nouveau</span>' : '') +
-      `<button class="del" title="Supprimer">✕</button><img src="${res.url}" alt="" draggable="false">`
+      `<button class="del" title="Supprimer">✕</button><img src="${res.url}" alt="" draggable="false">` +
+      ppStripHtml(res)
     cell.querySelector('.del').addEventListener('click', (ev) => {
       ev.stopPropagation()
       removeResult(res.id)
     })
+    wirePpStrip(cell, res)
     attachDrag(cell, res)
     grid.appendChild(cell)
   })
+}
+// Bandeau passe-partout (poster) : aperçu du jumeau + re-roll + activation/désactivation.
+// Overlay absolu -> n'entre PAS dans la géométrie du drag (qui itère grid.children).
+function ppStripHtml(res) {
+  if (!ppEligible() || res.kept) return ''
+  const pp = res.pp
+  if (pp && pp.busy) return `<div class="pp-strip"><span class="pp-spin"></span>passe-partout…</div>`
+  if (pp && pp.optedOut)
+    return `<div class="pp-strip off"><span>sans passe-partout</span><button class="pp-act pp-on" title="Ajouter le passe-partout">+</button></div>`
+  if (pp && pp.error)
+    return `<div class="pp-strip err"><span>passe-partout échoué</span><button class="pp-act pp-reroll" title="Réessayer">↻</button></div>`
+  if (pp && pp.url)
+    return `<div class="pp-strip"><img class="pp-thumb" src="${pp.url}" alt="" draggable="false"><span>passe-partout</span><button class="pp-act pp-reroll" title="Régénérer">↻</button><button class="pp-act pp-offbtn" title="Retirer">✕</button></div>`
+  return '' // pas encore généré (sera mis en file) ou source non re-rendable
+}
+function wirePpStrip(cell, res) {
+  const strip = cell.querySelector('.pp-strip')
+  if (!strip) return
+  strip.addEventListener('pointerdown', (ev) => ev.stopPropagation()) // n'arme pas le drag
+  const thumb = strip.querySelector('.pp-thumb')
+  if (thumb) thumb.addEventListener('click', (ev) => { ev.stopPropagation(); openLightbox(res.pp.url) })
+  const reroll = strip.querySelector('.pp-reroll')
+  if (reroll) reroll.addEventListener('click', (ev) => { ev.stopPropagation(); res.pp = { busy: true }; renderResults(); queueTwin(res) })
+  const toggle = strip.querySelector('.pp-on, .pp-offbtn')
+  if (toggle) toggle.addEventListener('click', (ev) => { ev.stopPropagation(); toggleTwin(res.id) })
 }
 function removeResult(id) {
   const res = state.results.find((r) => r.id === id)
@@ -1713,6 +1887,7 @@ function removeResult(id) {
   renderResults()
   refreshAction()
   if (res && res.path) fetch(RENDER + '/api/upload/' + res.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
+  if (res) dropTwinFile(res.pp) // jumeau passe-partout lié -> supprimé avec son mockup
 }
 // Réorganisation par APPUI LONG puis glisser — refonte « follow finger + push apart ».
 //
@@ -2176,9 +2351,9 @@ $('#publishBtn').addEventListener('click', async () => {
       progress.step(`Préparation des images… (${i + 1}/${state.results.length})`)
       const res = state.results[i]
       if (IS_REIMAGE && res.kept) {
-        imgs.push({ mediaId: res.mediaId, type: 'mockup' })
+        imgs.push({ mediaId: res.mediaId, type: 'mockup', clientId: res.id })
       } else {
-        imgs.push({ base64Image: await toB64(res.url), type: 'mockup', mockupContext: res.context })
+        imgs.push({ base64Image: await toB64(res.url), type: 'mockup', mockupContext: res.context, clientId: res.id })
       }
       if (i === 0)
         imgs.push(
@@ -2186,6 +2361,23 @@ $('#publishBtn').addEventListener('click', async () => {
             ? { mediaId: state.oeuvre.mediaId, type: 'original' }
             : { base64Image: state.imageDataUrl, type: 'original' }
         )
+    }
+    // Passe-partout (poster) : on AJOUTE les jumeaux EN FIN de tableau, dans l'ordre des mockups
+    // (l'œuvre n°2 n'est jamais doublée). Chacun réutilisera l'alt/le filename de son mockup source
+    // côté backend (passePartoutOf=clientId, suffixe « passe-partout », zéro IA).
+    if (ppEligible()) {
+      const twins = state.results.filter((r) => !r.kept && r.pp && r.pp.url && !r.pp.optedOut)
+      for (let i = 0; i < twins.length; i++) {
+        const res = twins[i]
+        progress.step(`Préparation des passe-partout… (${i + 1}/${twins.length})`)
+        imgs.push({
+          base64Image: await toB64(res.pp.url),
+          type: 'mockup',
+          mockupContext: res.context,
+          passePartout: true,
+          passePartoutOf: res.id,
+        })
+      }
     }
     // Clé d'idempotence : stable tant que le CONTENU à publier ne change pas — un re-clic
     // après un timeout (524) renvoie le résultat déjà obtenu au lieu d'un doublon. En

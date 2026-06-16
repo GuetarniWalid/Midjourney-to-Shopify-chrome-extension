@@ -234,6 +234,19 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .result-cell .del{position:absolute;top:var(--s2);right:var(--s2);width:28px;height:28px;border-radius:50%;
   background:rgba(28,32,36,.55);color:#fff;border:0;cursor:pointer;font-size:13px;display:grid;place-items:center}
 .result-cell .del:hover{background:var(--danger)}
+/* ---- passe-partout : jumeau d'affiche (poster) — bandeau overlay en bas de la vignette ---- */
+.result-cell .pp-strip{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;align-items:center;gap:6px;
+  padding:5px 6px;background:linear-gradient(transparent,rgba(28,32,36,.66) 40%);color:#fff;font-size:11px;font-weight:600}
+.result-cell .pp-strip.off{color:#EAD9A6}
+.result-cell .pp-strip.err{color:#FFC9C0}
+.result-cell .pp-strip>span{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.result-cell .pp-thumb{width:30px;height:30px;border-radius:6px;object-fit:cover;border:1.5px solid #fff;background:#fff;flex:0 0 auto;cursor:zoom-in}
+.result-cell .pp-act{flex:0 0 auto;width:24px;height:24px;border-radius:50%;border:0;cursor:pointer;
+  background:rgba(255,255,255,.22);color:#fff;font-size:13px;line-height:1;display:grid;place-items:center}
+.result-cell .pp-act:hover{background:rgba(255,255,255,.4)}
+.result-cell .pp-spin{flex:0 0 auto;width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.4);
+  border-top-color:#fff;animation:pp-spin .7s linear infinite}
+@keyframes pp-spin{to{transform:rotate(360deg)}}
 .empty{color:var(--muted);text-align:center;padding:var(--s5) 0;font-size:15px;line-height:1.5;max-width:360px;margin:0 auto}
 
 /* ---- barre d'action fixe ---- */
