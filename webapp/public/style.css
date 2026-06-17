@@ -206,9 +206,6 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
   background:rgba(255,255,255,.92);box-shadow:var(--shadow-sm);display:grid;place-items:center;pointer-events:none}
 .mc-fav-badge svg{width:15px;height:15px;fill:var(--star);display:block}
 
-/* décors IA incompatibles avec l'orientation courante */
-.saved-cell.incompatible{opacity:.4;filter:grayscale(.55)}
-
 /* ---- rendus / drag-drop ---- */
 .results-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr));gap:var(--s4)}
 .result-cell{position:relative;min-width:0;border-radius:var(--r-lg);overflow:hidden;border:1px solid var(--border);

@@ -1272,7 +1272,11 @@ function renderMockups() {
       if (L) push(sectionForPsd(L.psd, cat.name), { kind: 'photopea', cat, sub, L })
     }
   }
-  for (const t of state.saved.ai.filter((t) => !t.product || PRODUCT_TO_TYPE[t.product] === state.productType)) {
+  // Filtrage STRICT par ratio : un décor IA n'apparaît que dans son orientation (un portrait ne
+  // pollue plus les vues carré/paysage). Les fiches héritées sans orientation restent visibles partout.
+  for (const t of state.saved.ai.filter(
+    (t) => (!t.product || PRODUCT_TO_TYPE[t.product] === state.productType) && (!t.orientation || t.orientation === ori)
+  )) {
     push(t.section || roomLabelOf(t.roomType), { kind: 'ai', data: t })
   }
   const rooms = Object.keys(groups).sort((a, b) => (a === 'Autre') - (b === 'Autre') || a.localeCompare(b, 'fr'))
@@ -1326,10 +1330,8 @@ function buildMockupCell(e, ori) {
     })
   } else {
     const t = e.data
-    const oriT = t.orientation
-    const compatible = !oriT || oriT === ori
-    cell.className = 'mockup-cell saved-cell' + (compatible ? '' : ' incompatible')
-    cell.title = compatible ? '' : `Décor en ${labelOri(oriT)} — changez l'orientation de l'image`
+    // Décor IA déjà filtré par ratio en amont (renderMockups) -> toujours compatible ici.
+    cell.className = 'mockup-cell saved-cell'
     cell.innerHTML = `${favStarHtml(!!t.favorite)}<img src="${renderUrl(t.url)}" loading="lazy" alt=""><div class="mc-label">${escapeHtml(t.theme || 'Décor IA')}</div>`
     cell.addEventListener('click', () => {
       if (cell._suppressClick) { cell._suppressClick = false; return }
