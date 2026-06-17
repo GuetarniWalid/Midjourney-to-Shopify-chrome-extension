@@ -250,7 +250,7 @@ app.post('/api/saved-templates/photopea', async (req, res) => {
 // Sauvegarde un décor IA vierge : écrit l'image sur disque puis enregistre sa fiche.
 app.post('/api/saved-templates/ai', async (req, res) => {
   try {
-    const { image, product, orientation, theme, roomType, origin, section } = req.body || {};
+    const { image, product, orientation, theme, roomType, origin, section, familyId, scene } = req.body || {};
     if (!image || !image.startsWith('data:')) return res.status(400).json({ success: false, error: 'image (dataURL) requise' });
     const m = image.match(/^data:([^;]+);base64,(.*)$/);
     if (!m) return res.status(400).json({ success: false, error: 'dataURL invalide' });
@@ -269,6 +269,8 @@ app.post('/api/saved-templates/ai', async (req, res) => {
           roomType: roomType || null, // pièce choisie au dropdown -> regroupement par pièce dans l'UI
           section: (typeof section === 'string' && section.trim()) ? section.trim() : null, // override de section affichée (prioritaire sur roomType) ; null = retombe sur roomType/Autre
           origin: origin === 'upload' ? 'upload' : null, // provenance interne (debug) : 'upload' = photo importée nettoyée, null = décor généré
+          familyId: (typeof familyId === 'string' && familyId.trim()) ? familyId.trim() : null, // lie les 3 ratios (portrait/carré/paysage) d'un même décor
+          scene: (typeof scene === 'string' && scene.trim()) ? scene.trim() : null, // brief art-director -> rejouable pour compléter les ratios manquants
           savedAt: new Date().toISOString(),
         };
         db.ai.push(r);
@@ -294,10 +296,18 @@ app.patch('/api/saved-templates/ai/:id', async (req, res) => {
     const updated = await mutateSaved((db) => {
       const rec = db.ai.find((t) => t.id === id);
       if (!rec) return null;
-      if ('favorite' in body) rec.favorite = !!body.favorite;
+      // familyId : assigné sur la SEULE fiche ciblée (rattache un ancien décor mono-ratio à une famille).
+      if ('familyId' in body) {
+        const f = typeof body.familyId === 'string' ? body.familyId.trim() : '';
+        rec.familyId = f || null;
+      }
+      // favori & section = réglages au niveau FAMILLE : appliqués à TOUTES les fiches du même familyId
+      // (les 3 ratios partagent le même statut). Fiche sans familyId = famille de 1.
+      const family = rec.familyId ? db.ai.filter((t) => t.familyId === rec.familyId) : [rec];
+      if ('favorite' in body) for (const t of family) t.favorite = !!body.favorite;
       if ('section' in body) {
         const s = typeof body.section === 'string' ? body.section.trim() : '';
-        rec.section = s || null;
+        for (const t of family) t.section = s || null;
       }
       return rec;
     });
@@ -331,17 +341,27 @@ app.delete('/api/saved-templates/:kind/:id', async (req, res) => {
   try {
     const { kind, id } = req.params;
     if (kind !== 'photopea' && kind !== 'ai') return res.status(400).json({ success: false, error: 'kind invalide' });
+    // ?family=1 (décors IA) : supprime TOUTE la famille (les 3 ratios) au lieu de la seule fiche.
+    const wholeFamily = kind === 'ai' && (req.query.family === '1' || req.query.family === 'true');
     const removed = await mutateSaved((db) => {
       const arr = db[kind];
       const i = arr.findIndex((t) => t.id === id);
       if (i < 0) return null;
-      return arr.splice(i, 1)[0];
+      const target = arr[i];
+      if (wholeFamily && target.familyId) {
+        const fam = arr.filter((t) => t.familyId === target.familyId);
+        db[kind] = arr.filter((t) => t.familyId !== target.familyId);
+        return fam; // toutes les fiches de la famille
+      }
+      return [arr.splice(i, 1)[0]]; // une seule fiche (ce ratio)
     });
     if (!removed) return res.status(404).json({ success: false, error: 'introuvable' });
-    if (kind === 'ai' && removed.file) {
-      await fsp.unlink(path.join(SAVED_DIR, path.basename(removed.file))).catch(() => {});
+    if (kind === 'ai') {
+      for (const rec of removed) {
+        if (rec.file) await fsp.unlink(path.join(SAVED_DIR, path.basename(rec.file))).catch(() => {});
+      }
     }
-    res.json({ success: true });
+    res.json({ success: true, removed: removed.length });
   } catch (e) { res.status(500).json({ success: false, error: e.message }); }
 });
 

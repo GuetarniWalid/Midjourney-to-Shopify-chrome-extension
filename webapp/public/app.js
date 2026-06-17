@@ -405,7 +405,8 @@ async function callDecorJob(body) {
     if (res.status === 404 || data.status === 'not_found')
       throw new Error('Session de génération expirée. Relance.')
     if (data.status === 'error') throw new Error(data.message || 'Échec de la génération du décor.')
-    if (data.status === 'done' && data.data && data.data.image) return data.data.image
+    // renvoie { image, scene } : le `scene` (brief art-director) sert à décliner les autres ratios.
+    if (data.status === 'done' && data.data && data.data.image) return data.data
   }
 }
 // Ouvre l'overlay en état "prêt" : le champ d'orientation + le bouton Générer sont visibles
@@ -437,7 +438,7 @@ async function runDecorGenerate() {
     const direction = vibeEl ? vibeEl.value.trim() : '' // orientation libre (raffinée côté serveur)
     const roomEl = $('#decorRoom')
     const roomType = roomEl && roomEl.value ? roomEl.value : null // '' = Auto -> le backend varie la pièce
-    const image = await callDecorJob({
+    const { image, scene } = await callDecorJob({
       image: state.imageDataUrl,
       target: state.orientation,
       product,
@@ -446,7 +447,8 @@ async function runDecorGenerate() {
     })
     // On fige les métadonnées AU MOMENT de la génération (produit/thème/orientation réels de cette
     // image) pour qu'une sauvegarde ultérieure ne dérive pas si l'utilisateur change de type produit.
-    lastDecor = { image, product, theme: direction || null, orientation: state.orientation, roomType }
+    // `scene` = brief art-director : mémorisé pour décliner les 2 autres ratios À L'IDENTIQUE au save.
+    lastDecor = { image, product, theme: direction || null, orientation: state.orientation, roomType, scene: scene || null }
     $('#decorImg').src = lastDecor.image
     $('#decorLoading').classList.add('hidden')
     $('#decorResult').classList.remove('hidden')
@@ -1337,11 +1339,21 @@ function buildMockupCell(e, ori) {
       if (cell._suppressClick) { cell._suppressClick = false; return }
       reuseSavedDecor(t)
     })
-    attachLongPress(cell, () => [
-      { label: t.favorite ? '★ Retirer des favoris' : '★ Ajouter aux favoris', onClick: () => toggleAiFavorite(t) },
-      { label: '📁 Ranger dans une section…', onClick: () => openSectionPicker({ kind: 'ai', id: t.id, current: t.section || roomLabelOf(t.roomType), origin: roomLabelOf(t.roomType), name: t.theme || 'Décor IA' }) },
-      { label: '🗑 Supprimer', danger: true, onClick: () => deleteSaved('ai', t.id) },
-    ])
+    attachLongPress(cell, () => {
+      const fam = familyOf(t)
+      const missing = missingOris(t)
+      const items = [
+        { label: t.favorite ? '★ Retirer des favoris' : '★ Ajouter aux favoris', onClick: () => toggleAiFavorite(t) },
+        { label: '📁 Ranger dans une section…', onClick: () => openSectionPicker({ kind: 'ai', id: t.id, current: t.section || roomLabelOf(t.roomType), origin: roomLabelOf(t.roomType), name: t.theme || 'Décor IA' }) },
+      ]
+      // Compléter : seulement si des ratios manquent ET que le décor est regénérable (pas un import).
+      if (missing.length && t.origin !== 'upload')
+        items.push({ label: `✨ Compléter les ratios manquants (${missing.map(labelOri).join(', ')})`, onClick: () => completeFamily(t) })
+      items.push({ label: '🗑 Supprimer ce ratio', danger: true, onClick: () => deleteSaved('ai', t.id) })
+      if (fam.length > 1)
+        items.push({ label: `🗑 Supprimer le décor entier (${fam.length} ratios)`, danger: true, onClick: () => deleteFamily(t) })
+      return items
+    })
   }
   return cell
 }
@@ -1587,31 +1599,136 @@ async function toggleFavorite(info) {
   }
 }
 
-// Sauvegarde le décor IA vierge actuellement affiché (toile blanche).
+/* ---------- Familles de décors : un décor décliné dans les 3 ratios, liés par familyId ---------- */
+const ALL_ORIS = ['portrait', 'square', 'landscape']
+const newFamilyId = () => 'fam_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
+// Toutes les fiches de la famille d'un décor (lui-même si pas de familyId : famille de 1).
+function familyOf(t) {
+  return t.familyId ? state.saved.ai.filter((x) => x.familyId === t.familyId) : [t]
+}
+// Orientations encore absentes de la famille (à compléter).
+function missingOris(t) {
+  const have = new Set(familyOf(t).map((x) => x.orientation).filter(Boolean))
+  return ALL_ORIS.filter((o) => !have.has(o))
+}
+// POST d'un décor IA sur le render server (réutilisé par enregistrement + complétion de famille).
+async function postAiDecor(rec) {
+  const r = await fetch(RENDER + '/api/saved-templates/ai', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image: rec.image,
+      product: rec.product,
+      orientation: rec.orientation,
+      theme: rec.theme || null,
+      roomType: rec.roomType || null,
+      familyId: rec.familyId || null,
+      scene: rec.scene || null,
+    }),
+  })
+  const data = await r.json()
+  if (!data.success) throw new Error(data.error || 'échec enregistrement')
+  return data.template
+}
+
+// Enregistre le décor IA affiché PUIS le décline dans les 2 autres ratios (MÊME scène = famille
+// cohérente). Le ratio courant est sauvé IMMÉDIATEMENT (jamais perdu) ; les autres se génèrent
+// ensuite (~15-20s chacun). Si un ratio échoue, la famille reste partielle (complétable plus tard).
 async function saveAiDecor() {
   if (!lastDecor) return toast('Aucun décor à sauvegarder', 'err')
   const btn = $('#decorSave')
   btn.disabled = true
+  // Captures FIGÉES : lastDecor (et le state) peut changer pendant les générations qui suivent.
+  const familyId = newFamilyId()
+  const { product, theme, roomType, scene } = lastDecor
+  const baseOri = lastDecor.orientation
+  const baseImage = lastDecor.image
+  // 1) ratio courant : image déjà en main -> enregistrement immédiat
   try {
-    const r = await fetch(RENDER + '/api/saved-templates/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        image: lastDecor.image,
-        product: lastDecor.product, // métadonnées figées à la génération (pas de dérive)
-        orientation: lastDecor.orientation,
-        theme: lastDecor.theme,
-        roomType: lastDecor.roomType || null, // pièce choisie -> regroupement par pièce
-      }),
-    })
-    const data = await r.json()
-    if (!data.success) throw new Error(data.error || 'échec')
-    toast('Décor enregistré ★', 'ok')
+    await postAiDecor({ image: baseImage, product, orientation: baseOri, theme, roomType, familyId, scene })
+  } catch (e) {
+    btn.disabled = false
+    return toast('Erreur : ' + e.message, 'err')
+  }
+  await loadSavedTemplates()
+  $('#decorOverlay').classList.add('hidden') // libère l'UI ; la déclinaison continue en fond
+  lastDecor = null
+  btn.disabled = false
+  // 2) les 2 autres ratios, rejoués depuis la scène mémorisée
+  const others = ALL_ORIS.filter((o) => o !== baseOri)
+  if (!scene) {
+    return toast('Décor enregistré ★ (ce ratio). Scène non mémorisée — complète les autres via « Compléter ».', 'ok')
+  }
+  toast('Décor enregistré ★ — déclinaison dans les autres ratios…', 'ok')
+  const hint = $('#mockupsHint')
+  let ok = 1, fail = 0
+  for (const ori of others) {
+    if (hint) hint.textContent = `Décor : génération ${labelOri(ori)} (${ok + fail + 1}/3)…`
+    try {
+      const { image } = await callDecorJob({ target: ori, product, scene })
+      await postAiDecor({ image, product, orientation: ori, theme, roomType, familyId, scene })
+      ok++
+    } catch (e) {
+      fail++
+      toast(`Ratio ${labelOri(ori)} non généré — « Compléter » plus tard`, 'err')
+    }
+  }
+  await loadSavedTemplates() // reflète les ratios produits + restaure le hint
+  toast(fail ? `Décor en ${ok}/3 ratios (${fail} à compléter)` : 'Décor décliné en 3 ratios ✓', fail ? 'err' : 'ok')
+}
+
+// Génère les ratios manquants d'une famille. Scène mémorisée -> famille cohérente ; sinon (ancien
+// décor sans scène) on regénère depuis thème/pièce = pièces indépendantes (best-effort). Rattache au besoin.
+async function completeFamily(t) {
+  if (!state.imageDataUrl) return toast("Ajoutez d'abord une image", 'err')
+  if (state.needsResize) return toast("Retaillez d'abord l'image au bon format", 'err')
+  const missing = missingOris(t)
+  if (!missing.length) return toast('Tous les ratios existent déjà', 'ok')
+  const product = t.product || 'canvas', theme = t.theme || null, roomType = t.roomType || null, scene = t.scene || null
+  let familyId = t.familyId
+  try {
+    if (!familyId) {
+      // ancien décor mono-ratio : on crée une famille et on y rattache la fiche existante
+      familyId = newFamilyId()
+      const r = await fetch(RENDER + '/api/saved-templates/ai/' + t.id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ familyId }),
+      })
+      if (!r.ok) throw new Error('rattachement à une famille échoué')
+    }
+    const hint = $('#mockupsHint')
+    let i = 0, fail = 0
+    for (const ori of missing) {
+      i++
+      if (hint) hint.textContent = `Décor : génération ${labelOri(ori)} (${i}/${missing.length})…`
+      try {
+        const body = scene ? { target: ori, product, scene } : { target: ori, product, theme: theme || '', roomType }
+        const { image } = await callDecorJob(body)
+        await postAiDecor({ image, product, orientation: ori, theme, roomType, familyId, scene })
+      } catch (e) {
+        fail++
+        toast(`Ratio ${labelOri(ori)} non généré (${e.message})`, 'err')
+      }
+    }
+    await loadSavedTemplates()
+    toast(fail ? `${missing.length - fail}/${missing.length} ratio(s) complété(s)` : 'Ratios complétés ✓', fail ? 'err' : 'ok')
+  } catch (e) {
+    toast('Erreur : ' + e.message, 'err')
+  }
+}
+
+// Supprime TOUTE la famille d'un décor (ses ratios) en une fois.
+async function deleteFamily(t) {
+  const fam = familyOf(t)
+  if (!confirm(`Supprimer ce décor dans ses ${fam.length} ratio(s) ?\nCette action est définitive.`)) return
+  try {
+    const r = await fetch(RENDER + '/api/saved-templates/ai/' + t.id + '?family=1', { method: 'DELETE' })
+    if (!r.ok) throw new Error('suppression échouée')
+    toast('Décor entier supprimé ✓', 'ok')
     await loadSavedTemplates()
   } catch (e) {
     toast('Erreur : ' + e.message, 'err')
-  } finally {
-    btn.disabled = false
   }
 }
 
