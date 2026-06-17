@@ -23,7 +23,13 @@ fs.mkdirSync(SAVED_DIR, { recursive: true });
 const app = express();
 app.use(cors()); // ouvert : l'UI (servie par le backend ou en local) doit pouvoir appeler ce moteur
 app.use(express.json({ limit: '60mb' }));
-app.use(express.static(path.join(__dirname, 'public'))); // sert l'UI aussi en local (test direct)
+// Dev : l'UI locale (public/ = index.html, app.js, style.css) ne doit JAMAIS être
+// mise en cache, sinon un changement de style/JS n'apparaît qu'après un Ctrl+Shift+R.
+// no-store => chaque simple F5 récupère la version fraîche. (En prod c'est le backend
+// qui sert l'UI, avec versionnage ?v=<hash> — voir sync-prod.js — donc ceci est dev-only.)
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res) { res.setHeader('Cache-Control', 'no-store'); },
+})); // sert l'UI aussi en local (test direct)
 app.use('/uploads', express.static(UPLOADS));
 // servir les aperçus directement depuis le dossier mockups
 app.use('/mockups', express.static(MOCKUPS_PATH));
