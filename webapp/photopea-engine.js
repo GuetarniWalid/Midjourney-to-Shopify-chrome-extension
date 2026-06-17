@@ -33,7 +33,12 @@ const HOST_HTML = `<!DOCTYPE html><html><body style="margin:0">
 </script></body></html>`;
 
 const EDIT_SCRIPT = `(function(){var d=app.activeDocument;function f(ls){for(var i=0;i<ls.length;i++){var L=ls[i],n=(L.name||'').toLowerCase();if(n.indexOf('artwork')>=0||n.indexOf('oeuvre')>=0||n.indexOf('add your art')>=0)return L;if(L.layers){var r=f(L.layers);if(r)return r;}}return null;}var a=f(d.layers);if(!a){app.echoToOE('NO_ARTWORK');return;}d.activeLayer=a;executeAction(stringIDToTypeID("placedLayerEditContents"));app.echoToOE('EDIT_OK');})();`;
-const REPLACE_SCRIPT = `(function(){var d=app.activeDocument;var L=d.activeLayer;function num(v){if(v==null)return NaN;if(typeof v==='number')return v;if(v.n!==undefined)return v.n;if(v.value!==undefined)return v.value;return Number(v);}function bn(L){var b=L.bounds;return[num(b[0]),num(b[1]),num(b[2]),num(b[3])];}var b=bn(L),lw=b[2]-b[0],lh=b[3]-b[1];if(lw>0&&lh>0){var p=Math.max(d.width/lw,d.height/lh)*100*1.02;L.resize(p,p);var nb=bn(L),cx=(nb[0]+nb[2])/2,cy=(nb[1]+nb[3])/2;L.translate(d.width/2-cx,d.height/2-cy);}d.flatten();d.save();d.close();app.echoToOE('REPLACED');})();`;
+// Cover-fit de l'œuvre dans le smart object. Ajout : si l'œuvre et le smart object ont des
+// orientations FRANCHEMENT opposées (paysage ↔ portrait), on tourne l'œuvre de 90° (sens horaire)
+// AVANT le cover-fit. Permet de réutiliser un même PSD pour les deux orientations (ex. le poster
+// enroulé) sans aucune logique par-template : le décalage d'orientation EST le déclencheur.
+// (En flux normal l'app cale déjà l'œuvre au format du mockup -> ao===so -> aucune rotation.)
+const REPLACE_SCRIPT = `(function(){var d=app.activeDocument;var L=d.activeLayer;function num(v){if(v==null)return NaN;if(typeof v==='number')return v;if(v.n!==undefined)return v.n;if(v.value!==undefined)return v.value;return Number(v);}function bn(L){var b=L.bounds;return[num(b[0]),num(b[1]),num(b[2]),num(b[3])];}function cls(w,h){var r=w/h;return r>1.1?1:(r<0.91?-1:0);}var b=bn(L),lw=b[2]-b[0],lh=b[3]-b[1];var ao=cls(lw,lh),so=cls(num(d.width),num(d.height));if(ao!==0&&so!==0&&ao!==so){L.rotate(90,AnchorPosition.MIDDLECENTER);var rb=bn(L);lw=rb[2]-rb[0];lh=rb[3]-rb[1];}if(lw>0&&lh>0){var p=Math.max(d.width/lw,d.height/lh)*100*1.02;L.resize(p,p);var nb=bn(L),cx=(nb[0]+nb[2])/2,cy=(nb[1]+nb[3])/2;L.translate(d.width/2-cx,d.height/2-cy);}d.flatten();d.save();d.close();app.echoToOE('REPLACED');})();`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
