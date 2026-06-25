@@ -61,6 +61,10 @@ const state = {
   // [{id, url, context, label, psd?|decor?+fidelity?, pp?:{url,path,busy,error,optedOut}}]
   // psd/decor : paramètres de rendu retenus pour re-générer le JUMEAU passe-partout (poster).
   results: [],
+  // Ordre d'affichage/publication des jumeaux passe-partout (par id) — INDÉPENDANT de l'ordre des
+  // mockups du haut : l'utilisateur réorganise les bords blancs « entre eux ». Réconcilié à chaque
+  // rendu (nouveaux ajoutés en fin, supprimés retirés) via ppOrderedResults().
+  ppOrder: [],
   mattedOeuvre: null, // œuvre avec passe-partout (dataURL), cache
   mattedOeuvreSrc: null, // source ayant servi au cache ci-dessus (invalidation si l'œuvre change)
   saved: { photopea: [], ai: [] }, // templates sauvegardés "pour toujours"
@@ -999,7 +1003,16 @@ function renderProductChosen() {
 // Empreinte ordonnée de la galerie : médias conservés par mediaId, nouveaux rendus par id
 // local. Sert au bouton publier (« quelque chose a-t-il changé ? ») ET à la rotation de la
 // clé d'idempotence (un payload différent ne doit jamais être dédupliqué par l'ancien).
-const galleryFp = () => state.results.map((r) => (r.kept ? r.mediaId : 'new:' + r.id)).join('|')
+const galleryFp = () =>
+  state.results.map((r) => (r.kept ? r.mediaId : 'new:' + r.id)).join('|') +
+  // ordre des jumeaux passe-partout inclus -> un réordonnancement des bords blancs SEUL est publiable (reimage)
+  '|pp:' +
+  (ppEligible()
+    ? ppOrderedResults()
+        .filter((r) => r.pp && r.pp.url && !r.pp.optedOut)
+        .map((r) => r.id)
+        .join(',')
+    : '')
 
 // L'œuvre du produit — TOUJOURS son image n°2 (index 1) : c'est l'image par défaut que le
 // Publisher place en 2e position à chaque publication. Produit à une seule image : celle-là.
@@ -1980,16 +1993,32 @@ function renderResults() {
       ev.stopPropagation()
       removeResult(res.id)
     })
-    attachDrag(cell, res)
+    attachDrag(cell, res, mainDragCtx)
     grid.appendChild(cell)
   })
   renderPpRow()
 }
-// 2e rangée « passe-partout » (poster) : les jumeaux EN GRAND (même taille que les rendus du
-// haut), cliquables -> lightbox pour les analyser, avec re-roll + désactivation. Grille SÉPARÉE
-// (#ppGrid) : aucune interaction avec le drag du haut (qui n'itère que #resultsGrid). Même numéro
-// que le rendu source pour la correspondance haut/bas.
+// Jumeaux passe-partout dans l'ordre choisi par l'utilisateur (state.ppOrder), réconcilié avec les
+// rendus courants : on garde l'ordre connu, on ajoute les nouveaux EN FIN, on retire les disparus.
+// Décorrélé de l'ordre des mockups du haut — c'est tout l'objet du drag de la 2e rangée.
+function ppOrderedResults() {
+  const eligible = state.results.filter((r) => !r.kept)
+  const byId = new Map(eligible.map((r) => [r.id, r]))
+  const order = (state.ppOrder || []).filter((id) => byId.has(id))
+  const seen = new Set(order)
+  for (const r of eligible) if (!seen.has(r.id)) order.push(r.id)
+  state.ppOrder = order
+  return order.map((id) => byId.get(id))
+}
+// 2e rangée « passe-partout » (poster) : les jumeaux EN GRAND (même taille que les rendus du haut),
+// avec re-roll + désactivation. Grille SÉPARÉE (#ppGrid), RÉORGANISABLE indépendamment du haut (même
+// moteur de drag, ppDragCtx) : tap -> lightbox, appui long -> glisser. Numéro = position dans la
+// 2e rangée (son propre ordre), pas celui du mockup source.
 function renderPpRow() {
+  // un jumeau qui finit de se générer pendant qu'on RÉORGANISE la 2e rangée détacherait proxy/
+  // placeholder -> on solde proprement le glisser AVANT de reconstruire. (Un glisser sur la grille
+  // du HAUT n'est pas concerné : renderPpRow ne touche pas #resultsGrid, cf. generateTwin.)
+  if (drag && drag.grid && drag.grid.id === 'ppGrid') teardownDrag()
   const section = $('#ppSection'),
     grid = $('#ppGrid')
   if (!section || !grid) return
@@ -1997,15 +2026,13 @@ function renderPpRow() {
   const show = ppEligible() && state.results.some((r) => !r.kept)
   section.classList.toggle('hidden', !show)
   if (!show) return
-  state.results.forEach((res, i) => {
-    if (res.kept) return
-    grid.appendChild(buildPpCell(res, i + 1))
-  })
+  ppOrderedResults().forEach((res, i) => grid.appendChild(buildPpCell(res, i + 1)))
 }
 function buildPpCell(res, num) {
   const pp = res.pp
   const cell = document.createElement('div')
   cell.className = 'result-cell pp-cell'
+  cell.dataset.id = res.id // requis par le drag (lecture de l'ordre depuis le DOM) et le FLIP d'atterrissage
   const numHtml = `<div class="num">${num}</div>`
   if (pp && pp.optedOut) {
     cell.classList.add('pp-muted')
@@ -2025,7 +2052,8 @@ function buildPpCell(res, num) {
       `<button class="del pp-disable" title="Désactiver le passe-partout">✕</button>` +
       `<button class="pp-reroll-btn" title="Régénérer">↻</button>` +
       `<img src="${pp.url}" alt="" draggable="false"><span class="pp-zoom" title="Agrandir">⤢</span>`
-    cell.addEventListener('click', () => openLightbox(pp.url))
+    // tap simple -> agrandir (géré par le drag : ppDragCtx.tap) ; appui long/glisser -> réorganiser
+    attachDrag(cell, res, ppDragCtx)
     cell.querySelector('.pp-disable').addEventListener('click', (ev) => { ev.stopPropagation(); toggleTwin(res.id) })
     cell.querySelector('.pp-reroll-btn').addEventListener('click', (ev) => { ev.stopPropagation(); rerollTwin(res) })
     return cell
@@ -2188,7 +2216,7 @@ function endDrag(e) {
   if (drag.armed) { finishDrop(); return } // dépose (avec ou sans déplacement)
   const cur = drag
   teardownDrag()
-  openLightbox(cur.res.url) // tap simple (pas d'appui long) -> agrandir
+  cur.ctx.tap(cur.res) // tap simple (pas d'appui long) -> agrandir (rendu du haut OU jumeau du bas)
 }
 
 // Dépose : on fige le nouvel ordre IMMÉDIATEMENT (pas de commit différé — sinon un callback en
@@ -2205,15 +2233,15 @@ function finishDrop() {
   document.removeEventListener('pointerup', endDrag)
   document.removeEventListener('pointercancel', cancelDrag)
   try { if (cur.captured) cur.cell.releasePointerCapture(cur.pointerId) } catch (_) {}
-  const grid = cur.placeholder.parentElement
+  const grid = cur.grid
   const from = cur.cell.getBoundingClientRect() // où le doigt a lâché la cellule flottante
   const order = [...grid.children]
     .map((n) => (n === cur.placeholder ? cur.id : n === cur.cell ? null : n.dataset.id))
     .filter(Boolean)
-  state.results.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id))
+  cur.ctx.commit(order) // fige le nouvel ordre dans le bon modèle (state.results OU state.ppOrder)
   grid.classList.remove('reordering')
   grid.style.minHeight = '' // déverrouille la hauteur avant la reconstruction (hauteur naturelle)
-  renderResults() // reconstruit dans le nouvel ordre (détruit le proxy + le placeholder, renumérote)
+  cur.ctx.render() // reconstruit la grille concernée dans le nouvel ordre (détruit proxy + placeholder, renumérote)
   refreshAction() // reimage v2 : un simple réordonnancement est un changement publiable
   // FLIP d'atterrissage : la nouvelle cellule part visuellement de la position du doigt et glisse
   // jusqu'à son slot via la transition CSS de base. Aucun timer différé -> aucune course possible.
@@ -2229,8 +2257,9 @@ function finishDrop() {
 function cancelDrag() {
   if (!drag) return
   const armed = drag.armed
+  const render = drag.ctx.render
   teardownDrag()
-  if (armed) renderResults() // resynchronise les voisines à demi-FLIP après un pointercancel
+  if (armed) render() // resynchronise les voisines à demi-FLIP après un pointercancel
 }
 function teardownDrag() {
   if (!drag) return
@@ -2243,19 +2272,33 @@ function teardownDrag() {
   c.style.transform = c.style.width = c.style.height = c.style.transition = ''
   try { if (cur.captured) c.releasePointerCapture(cur.pointerId) } catch (_) {}
   if (cur.placeholder) cur.placeholder.remove()
-  const grid = $('#resultsGrid')
+  const grid = cur.grid
   if (grid) { grid.classList.remove('reordering'); grid.style.minHeight = '' }
   document.removeEventListener('pointermove', onDragMove)
   document.removeEventListener('pointerup', endDrag)
   document.removeEventListener('pointercancel', cancelDrag)
 }
-function attachDrag(cell, res) {
+// Contextes de glisser : la MÊME mécanique sert les 2 grilles (rendus du haut & jumeaux passe-partout
+// du bas). Chacun dit comment FIGER le nouvel ordre (commit), quoi RE-RENDRE (render) et l'action d'un
+// simple tap (agrandir l'image concernée).
+const mainDragCtx = {
+  commit: (order) => state.results.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id)),
+  render: renderResults,
+  tap: (res) => openLightbox(res.url),
+}
+const ppDragCtx = {
+  commit: (order) => { state.ppOrder = order.slice() },
+  render: renderPpRow,
+  tap: (res) => { if (res.pp && res.pp.url) openLightbox(res.pp.url) },
+}
+function attachDrag(cell, res, ctx) {
   cell.addEventListener('pointerdown', (e) => {
     if (e.button !== undefined && e.button !== 0) return // clic gauche / tactile uniquement
-    if (e.target.closest('.del')) return // pas sur le bouton supprimer
+    if (e.target.closest('button')) return // pas sur un bouton (supprimer / réessayer / désactiver)
     if (drag) return // un glisser est déjà en cours (2e doigt) -> on ne l'interrompt pas
     drag = {
-      id: cell.dataset.id, cell, res, pointerId: e.pointerId, pointerType: e.pointerType,
+      id: cell.dataset.id, cell, res, ctx, grid: cell.parentElement,
+      pointerId: e.pointerId, pointerType: e.pointerType,
       startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY,
       armed: false, moved: false, captured: false, placeholder: null,
       w: 0, h: 0, grabX: 0, grabY: 0, scrollDir: 0, edgeSince: 0, edgeTop: 0, edgeBottom: 0, raf: 0, timer: null,
@@ -2274,9 +2317,10 @@ function attachDrag(cell, res) {
 // présent dès le touchstart, condition sine qua non pour bloquer un pan tactile). Tant que le glisser
 // n'est pas armé il ne fait RIEN -> la liste scrolle normalement.
 ;(function initTouchGuard() {
-  const grid = $('#resultsGrid')
-  if (!grid) return
-  grid.addEventListener('touchmove', (e) => { if (drag && drag.armed) e.preventDefault() }, { passive: false })
+  ;['#resultsGrid', '#ppGrid'].forEach((sel) => {
+    const grid = $(sel)
+    if (grid) grid.addEventListener('touchmove', (e) => { if (drag && drag.armed) e.preventDefault() }, { passive: false })
+  })
 })()
 
 /* ---------- Lightbox ---------- */
@@ -2520,7 +2564,7 @@ $('#publishBtn').addEventListener('click', async () => {
     // (l'œuvre n°2 n'est jamais doublée). Chacun réutilisera l'alt/le filename de son mockup source
     // côté backend (passePartoutOf=clientId, suffixe « passe-partout », zéro IA).
     if (ppEligible()) {
-      const twins = state.results.filter((r) => !r.kept && r.pp && r.pp.url && !r.pp.optedOut)
+      const twins = ppOrderedResults().filter((r) => r.pp && r.pp.url && !r.pp.optedOut)
       for (let i = 0; i < twins.length; i++) {
         const res = twins[i]
         progress.step(`Préparation des passe-partout… (${i + 1}/${twins.length})`)
