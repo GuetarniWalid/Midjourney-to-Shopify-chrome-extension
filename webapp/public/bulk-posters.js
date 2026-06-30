@@ -87,12 +87,25 @@ async function renderPsd(psd, image, mockupContext) {
 }
 
 // Œuvre « mat-ée » (marge blanche, COVER) pour le jumeau passe-partout — canvas, sans IA.
-function buildMattedOeuvre(srcDataUrl) {
+// IMPORTANT : on construit la toile AU FORMAT CIBLE du poster (targetRatio = L/H : 3/4 portrait,
+// 4/3 paysage), PAS au ratio natif de l'œuvre. Sinon, quand le smart object recadre l'image au
+// format du poster, il rogne la bordure sur l'axe en trop (haut/bas pour une œuvre trop allongée).
+// En la matant déjà au bon format, le smart object n'a plus rien à rogner → bordure égale 4 côtés.
+function buildMattedOeuvre(srcDataUrl, targetRatio) {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => {
-      const W = img.naturalWidth,
-        H = img.naturalHeight
+      const aw = img.naturalWidth,
+        ah = img.naturalHeight
+      // Toile au format cible, calée sur la résolution de l'œuvre.
+      let W, H
+      if (targetRatio >= 1) {
+        W = aw
+        H = Math.round(aw / targetRatio)
+      } else {
+        H = ah
+        W = Math.round(ah * targetRatio)
+      }
       const m = Math.round(PP_RATIO * Math.min(W, H))
       const c = document.createElement('canvas')
       c.width = W
@@ -102,9 +115,10 @@ function buildMattedOeuvre(srcDataUrl) {
       ctx.fillRect(0, 0, W, H)
       const iw = W - 2 * m,
         ih = H - 2 * m
-      const scale = Math.max(iw / W, ih / H)
-      const dw = W * scale,
-        dh = H * scale
+      // COVER de l'œuvre (aw×ah) dans le cadre intérieur (léger rognage accepté).
+      const scale = Math.max(iw / aw, ih / ah)
+      const dw = aw * scale,
+        dh = ah * scale
       ctx.save()
       ctx.beginPath()
       ctx.rect(m, m, iw, ih)
@@ -179,8 +193,10 @@ async function buildPosterImages(toile, onStep) {
     mockups.push({ url, context: 'Décor sur-mesure (IA)', decor, fidelity: 'standard', clientId: uid() })
   }
 
-  // Jumeaux passe-partout (un par mockup), œuvre mat-ée.
-  const matted = await buildMattedOeuvre(artwork)
+  // Jumeaux passe-partout (un par mockup). On mate l'œuvre AU FORMAT DU POSTER (3:4 portrait /
+  // 4:3 paysage) pour que le smart object ne recadre pas la bordure haut/bas.
+  const targetRatio = state.ratio === 'landscape' ? 4 / 3 : 3 / 4
+  const matted = await buildMattedOeuvre(artwork, targetRatio)
   const twins = []
   let j = 0
   for (const m of mockups) {
