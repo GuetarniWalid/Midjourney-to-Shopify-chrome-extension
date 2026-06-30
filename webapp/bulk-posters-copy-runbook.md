@@ -14,10 +14,11 @@ jeton de service et parle au backend. Pour lire le texte source des toiles, util
 ## 0. Pré-requis (le owner les vérifie AVANT de te lancer)
 - Moteur de rendu PC démarré (`node server.js`, port 4000) **avec `sharp` installé** (`npm install`
   dans `webapp/` après le pivot) et **redémarré**.
-- `webapp/.env` : `BULK_POSTERS_TOKEN=<secret>` (+ `BACKEND_BASE` si autre que la prod).
-- Backend (DigitalOcean) : **même** `BULK_POSTERS_TOKEN` dans les variables d'env, déployé.
 - Favoris ★ poster **Photopea** configurés dans le studio pour l'orientation lancée (portrait ET/OU
   paysage). Le mode COPIE n'utilise **aucun décor IA** (zéro Gemini) : seuls les favoris Photopea.
+- (Aucun secret/token à configurer : les endpoints `/api/bulk-posters/*` ne sont pas authentifiés,
+  comme le bouton « publier ». `BACKEND_BASE` n'est à poser dans `webapp/.env` que si le backend
+  n'est pas la prod `https://www.myselfmonart.com`.)
 
 ## 1. Paramètres du run (donnés par le owner)
 - `ratio` : `portrait` ou `landscape` (un seul à la fois).

@@ -128,22 +128,17 @@ async function buildPosterImages(deps, artworkUrl, ratio) {
   return imgs
 }
 
-/* ---------- appels backend (jeton de service x-bulk-token) ---------- */
+/* ---------- appels backend (endpoints /api/bulk-posters/* non authentifiés, comme /publish) ---------- */
 function ensureConfig(config) {
-  if (!config || !config.token) {
-    throw new Error('BULK_POSTERS_TOKEN non configuré sur le moteur de rendu (.env)')
+  if (!config || !config.backendBase) {
+    throw new Error('BACKEND_BASE non configuré sur le moteur de rendu')
   }
-  if (!config.backendBase) throw new Error('BACKEND_BASE non configuré sur le moteur de rendu (.env)')
 }
 async function backendPost(config, path, body) {
   ensureConfig(config)
   const r = await fetch(config.backendBase + path, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'x-bulk-token': config.token,
-    },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(body),
   })
   const data = await r.json().catch(() => ({}))
@@ -154,9 +149,7 @@ async function backendPost(config, path, body) {
 }
 async function backendGet(config, path) {
   ensureConfig(config)
-  const r = await fetch(config.backendBase + path, {
-    headers: { Accept: 'application/json', 'x-bulk-token': config.token },
-  })
+  const r = await fetch(config.backendBase + path, { headers: { Accept: 'application/json' } })
   const data = await r.json().catch(() => ({}))
   return { status: r.status, ok: r.ok, data }
 }

@@ -14,10 +14,9 @@ const { registerBulkPostersRoutes } = require('./bulk-posters-render');
 // ---- Config (via variables d'environnement) ----
 const PORT = process.env.PORT || 4000;
 const MOCKUPS_PATH = process.env.MOCKUPS_PATH || String.raw`C:\Users\gueta\Documents\MyselfMonArt - Mockups (templates PSD)`;
-// Batch « posters en masse » (pivot COPIE) : base du backend Adonis + jeton de service partagé.
-// BULK_POSTERS_TOKEN doit être IDENTIQUE à la variable d'env du backend (DigitalOcean).
+// Batch « posters en masse » (pivot COPIE) : base du backend Adonis. Les endpoints /api/bulk-posters/*
+// ne sont pas authentifiés (comme /publish) → aucun secret à configurer. Surchargeable via BACKEND_BASE.
 const BACKEND_BASE = (process.env.BACKEND_BASE || 'https://www.myselfmonart.com').replace(/\/$/, '');
-const BULK_POSTERS_TOKEN = process.env.BULK_POSTERS_TOKEN || '';
 const UPLOADS = path.join(__dirname, 'uploads');
 fs.mkdirSync(UPLOADS, { recursive: true });
 // Templates sauvegardés "pour toujours" : favoris Photopea (références PSD) + décors IA vierges (fichiers image).
@@ -434,7 +433,7 @@ registerBulkPostersRoutes(app, {
   engine,
   psdDiskPath,
   readSaved,
-  config: { backendBase: BACKEND_BASE, token: BULK_POSTERS_TOKEN },
+  config: { backendBase: BACKEND_BASE },
 });
 
 // ---- Boot ----
