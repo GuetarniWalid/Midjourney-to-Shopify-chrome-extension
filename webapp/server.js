@@ -9,10 +9,15 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { PhotopeaEngine } = require('./photopea-engine');
+const { registerBulkPostersRoutes } = require('./bulk-posters-render');
 
 // ---- Config (via variables d'environnement) ----
 const PORT = process.env.PORT || 4000;
 const MOCKUPS_PATH = process.env.MOCKUPS_PATH || String.raw`C:\Users\gueta\Documents\MyselfMonArt - Mockups (templates PSD)`;
+// Batch « posters en masse » (pivot COPIE) : base du backend Adonis + jeton de service partagé.
+// BULK_POSTERS_TOKEN doit être IDENTIQUE à la variable d'env du backend (DigitalOcean).
+const BACKEND_BASE = (process.env.BACKEND_BASE || 'https://www.myselfmonart.com').replace(/\/$/, '');
+const BULK_POSTERS_TOKEN = process.env.BULK_POSTERS_TOKEN || '';
 const UPLOADS = path.join(__dirname, 'uploads');
 fs.mkdirSync(UPLOADS, { recursive: true });
 // Templates sauvegardés "pour toujours" : favoris Photopea (références PSD) + décors IA vierges (fichiers image).
@@ -422,9 +427,23 @@ app.delete('/api/mockup', async (req, res) => {
 // (collections + publish ne passent PAS par ce moteur : l'UI les appelle directement sur le backend,
 //  même origine que la page. Ce serveur ne fait que le rendu local des mockups.)
 
+// ---- Batch « posters en masse » (pivot COPIE, sans navigateur) ----
+// Endpoints orchestrés ici : /api/bulk-posters/candidates (proxy backend), /run-one (rendu favoris
+// Photopea + jumeaux sharp + create-one COPIE + finalize), /finalize-pending. cf. bulk-posters-render.js.
+registerBulkPostersRoutes(app, {
+  engine,
+  psdDiskPath,
+  readSaved,
+  config: { backendBase: BACKEND_BASE, token: BULK_POSTERS_TOKEN },
+});
+
 // ---- Boot ----
 (async () => {
-  app.listen(PORT, () => console.log(`\n  Moteur de rendu MyselfMonArt → http://localhost:${PORT}\n  Mockups: ${MOCKUPS_PATH}\n`));
+  const server = app.listen(PORT, () => console.log(`\n  Moteur de rendu MyselfMonArt → http://localhost:${PORT}\n  Mockups: ${MOCKUPS_PATH}\n`));
+  // /api/bulk-posters/run-one est long (plusieurs rendus Photopea + poll des variantes jusqu'à 120s) :
+  // on relève le timeout de requête bien au-dessus du défaut Node (5 min) pour ne pas couper l'agent.
+  server.requestTimeout = 600000; // 10 min
+  server.headersTimeout = 605000;
   if (process.env.SKIP_ENGINE) { console.log('[photopea] démarrage ignoré (SKIP_ENGINE).'); return; }
   try { await engine.start(); }
   catch (e) { console.error('[photopea] démarrage échoué:', e.message, '\n  Les rendus échoueront tant que le moteur n\'est pas prêt.'); }
