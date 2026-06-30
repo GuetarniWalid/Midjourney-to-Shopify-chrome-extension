@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Posters en masse — MyselfMonArt</title>
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      .bp-wrap { max-width: 860px; margin: 0 auto; padding: var(--page-pad, 16px); display: grid; gap: var(--s4, 16px); }
+      .bp-row { display: flex; flex-wrap: wrap; gap: var(--s3, 12px); align-items: flex-end; }
+      .bp-field { display: grid; gap: var(--s1, 4px); }
+      .bp-field label { font-size: 13px; color: var(--muted, #60646c); }
+      .bp-field select, .bp-field input {
+        height: 40px; padding: 0 12px; border: 1px solid var(--border, #cdced6);
+        border-radius: var(--r-md, 10px); background: var(--surface, #fff); color: var(--text, #1c2024); font-size: 15px;
+      }
+      .bp-actions { display: flex; gap: var(--s3, 12px); margin-top: var(--s2, 8px); }
+      #bp-status { font-size: 15px; font-weight: 600; margin: 0 0 var(--s2, 8px); }
+      #bp-counts { font-size: 13px; color: var(--muted, #60646c); margin: 0 0 var(--s3, 12px); }
+      #bp-log { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow: auto;
+        border-top: 1px solid var(--border-soft, #e4e4e7); }
+      .bp-log-line { font-size: 13px; padding: 6px 2px; border-bottom: 1px solid var(--border-soft, #e4e4e7); }
+      .bp-log-line.ok { color: #1a7f37; }
+      .bp-log-line.err { color: #b3261e; }
+      #bp-failed table { width: 100%; border-collapse: collapse; font-size: 13px; }
+      #bp-failed th, #bp-failed td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border-soft, #e4e4e7); vertical-align: top; }
+      #bp-failed .bp-err { color: #b3261e; max-width: 380px; }
+      .bp-note { font-size: 13px; color: var(--muted, #60646c); line-height: 1.5; }
+      .hidden { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">MyselfMonArt — Posters en masse</div>
+    </header>
+
+    <main class="bp-wrap">
+      <section class="card">
+        <h2>Créer les posters de mes toiles</h2>
+        <p class="bp-note">
+          Pour chaque toile du ratio choisi (sans poster déjà lié), on génère un poster complet :
+          mockups dédiés (favoris ★ poster + jumeaux passe-partout), texte IA, 7 variantes, puis lien
+          toile↔poster. <strong>Tout ou rien</strong> : un poster n'est publié que 100 % complet.
+          Garde cet onglet ouvert et le PC (moteur de rendu) allumé pendant le traitement.
+        </p>
+        <div class="bp-row">
+          <div class="bp-field">
+            <label for="bp-ratio">Ratio</label>
+            <select id="bp-ratio">
+              <option value="portrait">Portrait</option>
+              <option value="landscape">Paysage</option>
+            </select>
+          </div>
+          <div class="bp-field">
+            <label for="bp-count">Combien (vide = tout)</label>
+            <input id="bp-count" type="number" min="1" placeholder="ex. 3 pour tester" style="width: 160px" />
+          </div>
+          <div class="bp-field">
+            <label for="bp-test-ids">Test : IDs de toiles (option)</label>
+            <input id="bp-test-ids" type="text" placeholder="ex. 105329…, 105330…" style="width: 240px" />
+          </div>
+        </div>
+        <div class="bp-actions">
+          <button id="bp-run" class="primary-btn">Lancer / Continuer</button>
+          <button id="bp-stop" class="ghost-btn" disabled>Arrêter</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <p id="bp-status">Prêt.</p>
+        <p id="bp-counts"></p>
+        <ul id="bp-log"></ul>
+      </section>
+
+      <section class="card hidden" id="bp-failed">
+        <h2>Échecs (<span id="bp-failed-count">0</span>)</h2>
+        <p class="bp-note">
+          Ces toiles ont échoué après 2 tentatives (aucun poster incomplet n'a été mis en ligne).
+          Corrige le problème, puis relance-les.
+        </p>
+        <div class="bp-actions">
+          <button id="bp-failed-retry-all" class="primary-btn">Tout relancer</button>
+          <button id="bp-failed-clear" class="ghost-btn">Vider la liste</button>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Toile</th><th>Erreur</th><th></th></tr>
+          </thead>
+          <tbody id="bp-failed-list"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <!-- Config : en local, tout est sur le même serveur (vide = même origine).
+         En prod, le backend remplace cette config (renderBase = moteur du PC, apiBase = même origine). -->
+    <script>
+      window.PUBLISHER_CONFIG = window.PUBLISHER_CONFIG || { renderBase: '', apiBase: '' };
+    </script>
+    <script src="bulk-posters.js"></script>
+  </body>
+</html>

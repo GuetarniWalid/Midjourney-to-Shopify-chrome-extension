@@ -15,7 +15,7 @@ const MIRROR = path.join(BACKEND, 'public', 'publisher')
 const EDGE = path.join(BACKEND, 'resources', 'views', 'pages', 'publisher.edge')
 
 // --- 1. copies byte-identiques ---
-for (const f of ['app.js', 'style.css']) {
+for (const f of ['app.js', 'style.css', 'bulk-posters.js']) {
   fs.copyFileSync(path.join(FRONT, f), path.join(MIRROR, f))
   console.log(`copié  ${f} -> ${path.join(MIRROR, f)}`)
 }
@@ -58,9 +58,34 @@ html = html.replace(configAnchor, edgeConfig)
 fs.writeFileSync(EDGE, html)
 console.log(`généré ${EDGE}`)
 
+// --- 2b. bulk-posters.edge régénéré depuis bulk-posters.html (page autonome « posters en masse ») ---
+// Même principe que publisher.edge : on ne substitue que les chemins d'assets (versionnés) et le
+// bloc de config injecté par le backend (renderBase = moteur du PC ; apiBase = même origine).
+const vBulk = sha10('bulk-posters.js')
+let bp = fs.readFileSync(path.join(FRONT, 'bulk-posters.html'), 'utf8')
+const bpCssLocal = '<link rel="stylesheet" href="style.css" />'
+if (!bp.includes(bpCssLocal)) throw new Error('ancre stylesheet introuvable dans bulk-posters.html')
+bp = bp.replace(bpCssLocal, `<link rel="stylesheet" href="/publisher/style.css?v=${vCss}" />`)
+const bpConfigAnchor = /<!-- Config : en local[\s\S]*?<script src="bulk-posters\.js"><\/script>/
+if (!bpConfigAnchor.test(bp)) throw new Error('bloc de config local introuvable dans bulk-posters.html')
+const bpEdgeConfig = [
+  '<!-- Config injectée par le backend (renderBase = moteur de rendu du PC ; apiBase = même origine) -->',
+  '<script>',
+  '  window.PUBLISHER_CONFIG = {',
+  "    renderBase: {{{ JSON.stringify(renderBase || '') }}},",
+  "    apiBase: ''",
+  '  };',
+  '</script>',
+  `<script src="/publisher/bulk-posters.js?v=${vBulk}"></script>`,
+].join('\n')
+bp = bp.replace(bpConfigAnchor, bpEdgeConfig)
+const BULK_EDGE = path.join(BACKEND, 'resources', 'views', 'pages', 'bulk-posters.edge')
+fs.writeFileSync(BULK_EDGE, bp)
+console.log(`généré ${BULK_EDGE}`)
+
 // --- 3. vérification de parité ---
 const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 12)
-for (const f of ['app.js', 'style.css']) {
+for (const f of ['app.js', 'style.css', 'bulk-posters.js']) {
   const a = sha(path.join(FRONT, f))
   const b = sha(path.join(MIRROR, f))
   if (a !== b) throw new Error(`désynchro ${f} : ${a} != ${b}`)
