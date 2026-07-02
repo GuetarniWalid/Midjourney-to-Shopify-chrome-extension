@@ -15,7 +15,9 @@ const sharp = require('sharp')
 
 const PP_RATIO = 0.08 // bordure passe-partout = 8 % du petit côté (identique au studio)
 const POLL_INTERVAL = 4000
-const POLL_MAX_MS = 120000 // au-delà : variantes non créées -> cap quotidien probable
+const POLL_MAX_MS = 300000 // 5 min : le webhook de variantes ralentit sous charge (diag 02/07 : un
+// poster « capé » à 120 s se complète en réalité peu après). Poll plus long => bien moins de faux caps.
+// Un VRAI cap (variantes jamais créées) attend juste 5 min avant d'abandonner — rare (limite dure).
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const uid = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
@@ -286,6 +288,56 @@ async function runOne(deps, body) {
   return { status: 'failed', error: lastErr ? lastErr.message : 'échec inconnu' }
 }
 
+/* ---------- CREATE-ONLY : rendu + create-one, SANS poll ni finalize (approche découplée) ----------
+   Le problème du run-one synchrone : il attend (poll) que le webhook products/create ajoute les 7
+   variantes. Sous charge, le webhook prend du retard → faux « cap » (les variantes arrivent juste
+   après). create-only crée le BROUILLON et rend la main TOUT DE SUITE (borné au rendu ~100 s, pas au
+   webhook). Les webhooks fabriquent les variantes en arrière-plan ; une passe finalize-pending publie
+   chaque brouillon dès qu'il est complet. Aucun brouillon n'est supprimé pour un webhook lent. */
+async function createOnly(deps, body) {
+  const {
+    toileId,
+    artworkUrl,
+    ratio,
+    collectionId,
+    collectionTitle,
+    title,
+    descriptionHtml,
+    seoTitle,
+    seoDescription,
+  } = body || {}
+  if (
+    !toileId ||
+    !artworkUrl ||
+    (ratio !== 'portrait' && ratio !== 'landscape') ||
+    !collectionId ||
+    !title ||
+    !descriptionHtml ||
+    !seoTitle ||
+    !seoDescription
+  ) {
+    return { status: 'failed', error: 'paramètres manquants (create-only)' }
+  }
+  try {
+    const images = await buildPosterImages(deps, artworkUrl, ratio)
+    const created = await backendPost(deps.config, '/api/bulk-posters/create-one', {
+      toileId,
+      ratio,
+      collectionId,
+      collectionTitle: collectionTitle || '',
+      title,
+      descriptionHtml,
+      seoTitle,
+      seoDescription,
+      images,
+    })
+    if (!created.productId) throw new Error('create-one : pas de productId renvoyé')
+    return { status: 'draft', productId: created.productId, colorThemeFromAI: created.colorThemeFromAI === true }
+  } catch (e) {
+    return { status: 'failed', error: e && e.message ? e.message : String(e) }
+  }
+}
+
 /* ---------- finalise un brouillon déjà créé (reprise après cap, aucun re-rendu) ---------- */
 async function finalizePending(deps, body) {
   const { toileId, posterId, ratio } = body || {}
@@ -328,6 +380,17 @@ function registerBulkPostersRoutes(app, deps) {
     res.setTimeout(0)
     try {
       res.json(await runOne(deps, req.body || {}))
+    } catch (e) {
+      res.status(500).json({ status: 'failed', error: e.message })
+    }
+  })
+
+  // CREATE-ONLY : rendu + create-one, sans attendre le webhook (approche découplée, rapide).
+  app.post('/api/bulk-posters/create-only', async (req, res) => {
+    req.setTimeout(0)
+    res.setTimeout(0)
+    try {
+      res.json(await createOnly(deps, req.body || {}))
     } catch (e) {
       res.status(500).json({ status: 'failed', error: e.message })
     }
