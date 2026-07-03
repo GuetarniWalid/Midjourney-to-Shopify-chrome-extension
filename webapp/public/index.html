@@ -81,6 +81,42 @@
       </div>
     </section>
 
+    <!-- 3. Personnalisation studio (mode « poster personnalisé » uniquement — révélée par personalized.js).
+         Builder de studio.config : preset -> formulaires guidés -> validation live (P2). -->
+    <section class="card hidden" id="studioCard">
+      <div class="card-head">
+        <h2 class="card-title">3 · Personnalisation (studio)</h2>
+        <span id="studioBadge" class="hint">—</span>
+      </div>
+      <div class="field">
+        <label>Partir de :</label>
+        <select id="studioPreset" class="decor-vibe">
+          <option value="">Choisir un preset…</option>
+          <option value="famille-lineart">Famille dessin au trait — photo → nom → prénoms → format</option>
+          <option value="champs-texte">Champs texte — texte → format (sans photo)</option>
+          <option value="photo-simple">Photo simple — photo → format</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Slug technique du produit (productType)</label>
+        <input type="text" id="studioProductType" class="decor-vibe" placeholder="ex : couple-aquarelle" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <p class="card-note" id="studioProductTypeHint">Unique par produit — minuscules/chiffres/tirets. C'est la clé de routage back-end et de ségrégation des statistiques.</p>
+      </div>
+      <div id="studioSteps" class="studio-steps"></div>
+      <p id="studioEmpty" class="empty">Choisissez un preset : les étapes du parcours client se chargeront ici.</p>
+    </section>
+
+    <!-- 4. Recette IA (mode « poster personnalisé » uniquement).
+         Builder de studio.recipe + référence de style (P3). -->
+    <section class="card hidden" id="recipeCard">
+      <div class="card-head">
+        <h2 class="card-title">4 · Recette IA</h2>
+        <span id="recipeBadge" class="hint">—</span>
+      </div>
+      <div id="recipeForm"></div>
+      <p id="recipeEmpty" class="empty">La recette de génération se charge depuis le preset famille.</p>
+    </section>
+
     <!-- 3. Mockups (catalogue Photopea + décors IA, regroupés par pièce) -->
     <section class="card" id="mockupsCard">
       <div class="card-head">
@@ -283,5 +319,6 @@
      Quand la page est servie par le backend, celui-ci remplace cette config (voir publisher.edge). -->
 <script>window.PUBLISHER_CONFIG = window.PUBLISHER_CONFIG || { renderBase: '', apiBase: '' };</script>
 <script src="app.js"></script>
+<script src="personalized.js"></script>
 </body>
 </html>

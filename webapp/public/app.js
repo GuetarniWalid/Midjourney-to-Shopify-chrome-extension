@@ -8,10 +8,14 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)]
 const CFG = window.PUBLISHER_CONFIG || {}
 const RENDER = (CFG.renderBase || '').replace(/\/$/, '') // ex: https://xxx.trycloudflare.com ; '' = même origine (test local)
 const API = (CFG.apiBase || '').replace(/\/$/, '') // ex: '' (backend sert la page) ou http://localhost:3333
-// Mode de l'app : 'create' (publication classique) ou 'reimage' (refaire les images d'un produit
-// existant). Injecté par le backend en prod, ou via ?mode=reimage en dev (render server PC).
+// Mode de l'app : 'create' (publication classique), 'reimage' (refaire les images d'un produit
+// existant) ou 'personalized' (créer un poster personnalisé — builder studio.config/recipe).
+// Injecté par le backend en prod, ou via ?mode=… en dev (render server PC).
 const MODE = CFG.mode || new URLSearchParams(location.search).get('mode') || 'create'
 const IS_REIMAGE = MODE === 'reimage'
+// La logique du mode personalized vit dans personalized.js (chargé après ce fichier, même scope
+// global) ; app.js ne porte que les points de branchement (type verrouillé, action bar, payload).
+const IS_PERSONALIZED = MODE === 'personalized'
 // helper pour préfixer une URL relative (/uploads/.. , /mockups/..) par le moteur de rendu
 const renderUrl = (p) => RENDER + p
 // type produit (UI en FR) -> enum backend
@@ -54,7 +58,8 @@ const sectionForPsd = (psdUrl, fallback) => state.sectionOverrides[subfolderOf(p
 const state = {
   imageDataUrl: null, // l'oeuvre uploadée (dataURL)
   orientation: null, // 'portrait' | 'landscape' | 'square'
-  productType: 'toile',
+  // personalized : verrouillé poster AVANT le premier loadTemplates (sinon course toile/poster)
+  productType: IS_PERSONALIZED ? 'poster' : 'toile',
   collections: [],
   collection: null, // {id, title}
   templates: [], // catégories scannées
@@ -2475,6 +2480,8 @@ $('#progressClose').addEventListener('click', () => progress.hide())
 /* ---------- Publication ---------- */
 function refreshAction() {
   if (IS_REIMAGE) return refreshActionReimage()
+  // personalized : mêmes conditions que le mode create + config/recette valides (géré là-bas)
+  if (IS_PERSONALIZED && window.PersonalizedMode) return window.PersonalizedMode.refreshAction()
   const info = $('#actionInfo'),
     btn = $('#publishBtn')
   const n = state.results.length
@@ -2605,6 +2612,9 @@ $('#publishBtn').addEventListener('click', async () => {
           productType: TYPE_MAP[state.productType],
           parentCollection: { id: state.collection.id, title: state.collection.title },
           idempotencyKey: state.publishKey,
+          // personalized : bloc studioConfig/studioRecipe/référence (construit par personalized.js) ;
+          // le back crée alors le produit en BROUILLON avec la grille de variantes perso.
+          ...(IS_PERSONALIZED ? { personalized: window.PersonalizedMode.buildPublishBlock() } : {}),
         }
     progress.step(
       IS_REIMAGE

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "engine": "gemini",
+  "model": "gemini-3-pro-image",
+  "aspect": "3:4",
+  "candidates": 3,
+  "maxAttempts": 2,
+  "inputs": {
+    "tokens": { "from": "names", "split": true, "max": 6 },
+    "title": { "template": "La famille {familyName}", "required": true }
+  },
+  "reference": {
+    "texts": {
+      "title": "The Smith Family",
+      "slots": ["DADDY", "FRANCO", "MOMMY", "VERONICA"]
+    }
+  },
+  "prompt": {
+    "base": "Create a minimalist single continuous-line illustration ('one-line art' style): one delicate, even, pure-black line on a pure-white background - no color, no grey, no shading, no hatching, no background, no shadow. Redraw the family from the UPLOADED PHOTO in the exact line quality, composition, framing and hand-lettering of the STYLE-REFERENCE image: the family seen FROM BEHIND, gently walking, softly connected - holding hands, a parent carrying the youngest when there is a very small child - elegant and tender. From the photo, faithfully derive for EACH person their left-to-right order, relative height and apparent age (adult / child / toddler / baby), hair length, hairstyle and parting, and overall build and clothing silhouette - but always rendered from behind, faces undetailed, in the reference's clean thin single-line style. Do NOT add wings, halos, hats, pets or any accessory not clearly present in the uploaded photo. The final artwork is one continuous elegant black line on pure white, with no text other than the captions requested below.",
+    "imageRoles": "Two images are attached. IMAGE 1 is the CUSTOMER PHOTO: it is the ONLY source for the people - how many they are, their left-to-right order, relative heights, apparent ages, hair and build. IMAGE 2 is the STYLE REFERENCE: copy its line style, composition, pose, framing, typography and layout EXACTLY, but never copy its people, its faces or its words.",
+    "countLine": "The final illustration shows EXACTLY {n} person(s), in this left-to-right order: {tokens}. Render no other person, and no text other than the ones requested below.",
+    "replaceTitle": "Write the title in the reference's flowing script font, replacing « {from} » with « {to} » - exact spelling, same elegant hand-lettered style.",
+    "perPerson": "Under person #{index} (left to right), replace the reference caption « {from} » with « {to} » - EXACT spelling and casing, in the reference's evenly spaced serif capitals, separated from the next name by the same small heart.",
+    "addExtra": "Add one more person, consistent with the photo (matching height, apparent age and hair, viewed from behind, same single-line style), naturally connected in the row, with the caption « {to} » under them in the same lettering and even heart separators.",
+    "removeExtra": "Remove the person associated with the caption « {from} » and remove that caption, keeping the remaining family naturally connected and the name row evenly spaced.",
+    "footer": ""
+  },
+  "judge": { "text": true, "figureCount": true }
+}

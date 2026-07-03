@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "productType": "photo-simple",
+  "steps": [
+    {
+      "name": "photo",
+      "type": "photo",
+      "required": true,
+      "consent": { "required": true },
+      "payloadKey": "photo",
+      "title": { "fr": "Votre photo", "en": "Your photo", "de": "Dein Foto", "nl": "Je foto", "es": "Tu foto" },
+      "checkpointLabel": { "fr": "Photo", "en": "Photo", "de": "Foto", "nl": "Foto", "es": "Foto" },
+      "faceAngle": "front",
+      "photoCheck": false
+    },
+    {
+      "name": "format",
+      "type": "format",
+      "required": true,
+      "title": { "fr": "Format et finition", "en": "Format and finish", "de": "Format und Ausführung", "nl": "Formaat en afwerking", "es": "Formato y acabado" },
+      "checkpointLabel": { "fr": "Format", "en": "Format", "de": "Format", "nl": "Formaat", "es": "Formato" },
+      "roles": [
+        { "role": "size", "payloadKey": "format", "resolve": "dimensions" },
+        { "role": "frame", "payloadKey": "frame", "resolve": "slug" }
+      ]
+    }
+  ],
+  "payload": { "extra": { "consent": "1" } }
+}

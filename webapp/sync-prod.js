@@ -15,9 +15,18 @@ const MIRROR = path.join(BACKEND, 'public', 'publisher')
 const EDGE = path.join(BACKEND, 'resources', 'views', 'pages', 'publisher.edge')
 
 // --- 1. copies byte-identiques ---
-for (const f of ['app.js', 'style.css', 'bulk-posters.js']) {
+for (const f of ['app.js', 'style.css', 'bulk-posters.js', 'personalized.js']) {
   fs.copyFileSync(path.join(FRONT, f), path.join(MIRROR, f))
   console.log(`copié  ${f} -> ${path.join(MIRROR, f)}`)
+}
+
+// --- 1b. presets du mode « poster personnalisé » (copies depuis le repo thème, servis statiquement) ---
+const PRESETS_SRC = path.join(FRONT, 'presets')
+const PRESETS_DST = path.join(MIRROR, 'presets')
+fs.mkdirSync(PRESETS_DST, { recursive: true })
+for (const f of fs.readdirSync(PRESETS_SRC).filter((f) => f.endsWith('.json'))) {
+  fs.copyFileSync(path.join(PRESETS_SRC, f), path.join(PRESETS_DST, f))
+  console.log(`copié  presets/${f}`)
 }
 
 // --- 2. publisher.edge régénéré depuis index.html ---
@@ -43,7 +52,8 @@ const edgeConfig = [
   '<!-- Config injectée par le backend :',
   "     - renderBase : URL du moteur de rendu (PC, via tunnel Cloudflare) — variable d'env RENDER_ENGINE_URL",
   '     - apiBase    : vide => même origine (ce backend sert collections + publish)',
-  "     - mode       : '' = create (publication classique), 'reimage' = refaire les images d'un produit -->",
+  "     - mode       : '' = create (publication classique), 'reimage' = refaire les images d'un produit,",
+  "                    'personalized' = créer un poster personnalisé (builder studio.config/recipe) -->",
   '<script>',
   '  window.PUBLISHER_CONFIG = {',
   '    renderBase: {{{ JSON.stringify(renderBase || \'\') }}},',
@@ -54,6 +64,12 @@ const edgeConfig = [
   `<script src="/publisher/app.js?v=${vJs}"></script>`,
 ].join('\n')
 html = html.replace(configAnchor, edgeConfig)
+
+// personalized.js : hors du bloc de config (il suit app.js) -> substitution dédiée, versionnée
+const vPers = sha10('personalized.js')
+const persLocal = '<script src="personalized.js"></script>'
+if (!html.includes(persLocal)) throw new Error('balise personalized.js introuvable dans index.html')
+html = html.replace(persLocal, `<script src="/publisher/personalized.js?v=${vPers}"></script>`)
 
 fs.writeFileSync(EDGE, html)
 console.log(`généré ${EDGE}`)
@@ -85,7 +101,7 @@ console.log(`généré ${BULK_EDGE}`)
 
 // --- 3. vérification de parité ---
 const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 12)
-for (const f of ['app.js', 'style.css', 'bulk-posters.js']) {
+for (const f of ['app.js', 'style.css', 'bulk-posters.js', 'personalized.js']) {
   const a = sha(path.join(FRONT, f))
   const b = sha(path.join(MIRROR, f))
   if (a !== b) throw new Error(`désynchro ${f} : ${a} != ${b}`)

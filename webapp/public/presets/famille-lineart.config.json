@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "productType": "family-lineart",
+  "steps": [
+    {
+      "name": "photo",
+      "type": "photo",
+      "required": true,
+      "consent": { "required": true },
+      "payloadKey": "photo",
+      "title": { "fr": "Votre photo de famille", "en": "Your family photo", "de": "Dein Familienfoto", "nl": "Je familiefoto", "es": "Tu foto de familia" },
+      "checkpointLabel": { "fr": "Photo", "en": "Photo", "de": "Foto", "nl": "Foto", "es": "Foto" },
+      "faceAngle": "back",
+      "examples": {
+        "good": {
+          "image": "studio-photo-exemple-famille-bon-dos.jpg",
+          "alt": {
+            "fr": "Exemple de bonne photo : famille de dos, en pied, se tenant la main, silhouettes nettes",
+            "en": "Good photo example: family from behind, full-length, holding hands, sharp silhouettes",
+            "de": "Beispiel für ein gutes Foto: Familie von hinten, in voller Größe, Hand in Hand, klare Silhouetten",
+            "nl": "Voorbeeld van een goede foto: gezin van achteren, ten voeten uit, hand in hand, scherpe silhouetten",
+            "es": "Ejemplo de buena foto: familia de espaldas, de cuerpo entero, tomados de la mano, siluetas nítidas"
+          }
+        },
+        "bad": {
+          "image": "studio-photo-exemple-famille-mauvais-selfie.jpg",
+          "alt": {
+            "fr": "Exemple de photo à éviter : selfie serré, visages coupés, silhouettes invisibles",
+            "en": "Photo to avoid: tight selfie, cropped faces, no silhouettes visible",
+            "de": "Zu vermeidendes Foto: enges Selfie, abgeschnittene Gesichter, keine Silhouetten sichtbar",
+            "nl": "Te vermijden foto: strakke selfie, afgesneden gezichten, geen silhouetten zichtbaar",
+            "es": "Foto a evitar: selfie cerrado, caras cortadas, siluetas invisibles"
+          },
+          "caption": {
+            "fr": "À éviter : selfie serré, on ne voit pas les silhouettes",
+            "en": "Avoid: tight selfie, silhouettes not visible",
+            "de": "Zu vermeiden: enges Selfie, die Silhouetten sind nicht zu sehen",
+            "nl": "Vermijden: strakke selfie, de silhouetten zijn niet te zien",
+            "es": "A evitar: selfie cerrado, no se ven las siluetas"
+          }
+        }
+      },
+      "photoCheck": true,
+      "photoPolicy": {
+        "subject": "group",
+        "framing": "full-body",
+        "people": { "min": 1, "max": 6 },
+        "angles": { "back": "perfect", "front": "warn", "three-quarter": "warn", "profile": "warn" },
+        "messages": {
+          "warn_angle": {
+            "fr": "Photo acceptée — pour un dessin fidèle des silhouettes et des tailles, préférez une photo de dos, en pied.",
+            "en": "Photo accepted — for a faithful drawing of silhouettes and heights, prefer a photo from behind, full-length.",
+            "de": "Foto akzeptiert — am schönsten wird die Zeichnung mit einem Foto von hinten, in voller Größe.",
+            "nl": "Foto geaccepteerd — voor een getrouwe tekening van silhouetten en lengtes is een foto van achteren, ten voeten uit, ideaal.",
+            "es": "Foto aceptada — para un dibujo fiel de las siluetas y las alturas, es mejor una foto de espaldas y de cuerpo entero."
+          },
+          "reject_framing": {
+            "fr": "On ne voit pas tout le monde en entier : reprenez une photo des pieds à la tête.",
+            "en": "Not everyone is fully visible: retake a photo from head to toe.",
+            "de": "Es sind nicht alle vollständig zu sehen: mache ein neues Foto von Kopf bis Fuß.",
+            "nl": "Niet iedereen is volledig zichtbaar: maak een nieuwe foto van top tot teen.",
+            "es": "No se ve a todos de cuerpo entero: haz otra foto de pies a cabeza."
+          }
+        }
+      }
+    },
+    {
+      "name": "familyName",
+      "type": "text",
+      "required": true,
+      "maxLength": 24,
+      "charset": "free",
+      "payloadKey": "familyName",
+      "cartProperty": { "label": { "fr": "Nom de famille", "en": "Family name", "de": "Familienname", "nl": "Familienaam", "es": "Apellido" } },
+      "title": { "fr": "Votre nom de famille", "en": "Your family name", "de": "Dein Familienname", "nl": "Je familienaam", "es": "Tu apellido" },
+      "label": { "fr": "Nom affiché sous le dessin", "en": "Name shown under the artwork", "de": "Name unter der Zeichnung", "nl": "Naam onder de tekening", "es": "Nombre mostrado bajo el dibujo" },
+      "placeholder": { "fr": "Ex : Guetarni", "en": "E.g. Guetarni", "de": "z. B. Guetarni", "nl": "Bijv. Guetarni", "es": "Ej.: Guetarni" },
+      "checkpointLabel": { "fr": "Nom", "en": "Name", "de": "Name", "nl": "Naam", "es": "Apellido" }
+    },
+    {
+      "name": "memberNames",
+      "type": "text",
+      "required": true,
+      "maxLength": 140,
+      "charset": "free",
+      "payloadKey": "names",
+      "cartProperty": { "label": { "fr": "Prénoms", "en": "First names", "de": "Vornamen", "nl": "Voornamen", "es": "Nombres" } },
+      "title": { "fr": "Les prénoms, dans l'ordre", "en": "The names, in order", "de": "Die Vornamen, in der Reihenfolge", "nl": "De voornamen, op volgorde", "es": "Los nombres, en orden" },
+      "label": { "fr": "Prénoms de gauche à droite, séparés par des virgules", "en": "Names left to right, separated by commas", "de": "Vornamen von links nach rechts, durch Kommas getrennt", "nl": "Voornamen van links naar rechts, gescheiden door komma's", "es": "Nombres de izquierda a derecha, separados por comas" },
+      "placeholder": { "fr": "Ex : Papa, Franco, Maman, Veronica", "en": "E.g. Daddy, Franco, Mommy, Veronica", "de": "z. B. Papa, Franco, Mama, Veronica", "nl": "Bijv. Papa, Franco, Mama, Veronica", "es": "Ej.: Papá, Franco, Mamá, Veronica" },
+      "help": { "fr": "Dans le même ordre que sur votre photo (de gauche à droite).", "en": "Same order as on your photo (left to right).", "de": "In derselben Reihenfolge wie auf deinem Foto (von links nach rechts).", "nl": "In dezelfde volgorde als op je foto (van links naar rechts).", "es": "En el mismo orden que en tu foto (de izquierda a derecha)." },
+      "checkpointLabel": { "fr": "Prénoms", "en": "Names", "de": "Namen", "nl": "Namen", "es": "Nombres" }
+    },
+    {
+      "name": "format",
+      "type": "format",
+      "required": true,
+      "title": { "fr": "Format et finition", "en": "Format and finish", "de": "Format und Ausführung", "nl": "Formaat en afwerking", "es": "Formato y acabado" },
+      "checkpointLabel": { "fr": "Format", "en": "Format", "de": "Format", "nl": "Formaat", "es": "Formato" },
+      "roles": [
+        { "role": "size", "payloadKey": "format", "resolve": "dimensions" },
+        { "role": "frame", "payloadKey": "frame", "resolve": "slug" }
+      ]
+    }
+  ],
+  "payload": { "extra": { "consent": "1" } }
+}

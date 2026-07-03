@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "productType": "prenom",
+  "steps": [
+    {
+      "name": "firstName",
+      "type": "text",
+      "required": true,
+      "maxLength": 20,
+      "charset": "letters",
+      "transform": "uppercase",
+      "payloadKey": "firstName",
+      "title": { "fr": "Votre prénom", "en": "Your first name", "de": "Dein Vorname", "nl": "Je voornaam", "es": "Tu nombre" },
+      "checkpointLabel": { "fr": "Prénom", "en": "Name", "de": "Name", "nl": "Naam", "es": "Nombre" },
+      "label": { "fr": "Prénom à afficher", "en": "Name to display", "de": "Anzuzeigender Name", "nl": "Weer te geven naam", "es": "Nombre a mostrar" },
+      "placeholder": { "fr": "Ex : Lina", "en": "E.g. Lina", "de": "z. B. Lina", "nl": "Bijv. Lina", "es": "Ej.: Lina" }
+    },
+    {
+      "name": "format",
+      "type": "format",
+      "required": true,
+      "title": { "fr": "Format et finition", "en": "Format and finish", "de": "Format und Ausführung", "nl": "Formaat en afwerking", "es": "Formato y acabado" },
+      "checkpointLabel": { "fr": "Format", "en": "Format", "de": "Format", "nl": "Formaat", "es": "Formato" },
+      "roles": [
+        { "role": "size", "payloadKey": "format", "resolve": "dimensions" },
+        { "role": "frame", "payloadKey": "frame", "resolve": "slug" }
+      ]
+    }
+  ],
+  "payload": { "extra": {} }
+}
