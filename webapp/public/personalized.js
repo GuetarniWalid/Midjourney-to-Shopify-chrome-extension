@@ -59,10 +59,21 @@ const pState = {
   recipe: null,
   productType: '',
   photoExamples: { good: null, bad: null }, // base64 en attente (URL CDN posée au publish P4)
+  recipeSameAsDesign: true, // le design (carte 1) sert d'image de référence de style
+  styleRef: null, // base64 de la référence de style si ≠ design (URL CDN posée au publish P4)
   previewLang: 'fr',
   previewStepName: null,
   editing: null, // { index, working } pendant l'édition d'une étape
 }
+// Bornes recette (miroir de RecipeService côté back)
+const RECIPE_ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
+const RECIPE_ADVANCED = [
+  { key: 'imageRoles', label: 'Rôles des images (image 1 = photo, image 2 = référence)' },
+  { key: 'countLine', label: 'Ligne de comptage ({n}, {tokens})' },
+  { key: 'replaceTitle', label: 'Remplacement du titre ({from} → {to})' },
+  { key: 'addExtra', label: 'Ajouter une personne ({to})' },
+  { key: 'removeExtra', label: 'Retirer une personne ({from})' },
+]
 
 /* ---------- Helpers i18n ---------- */
 const t = (map, lang) => (map && typeof map === 'object' ? map[lang] || map.fr || '' : typeof map === 'string' ? map : '')
@@ -206,8 +217,7 @@ async function loadRecipePreset() {
   try {
     const preset = await fetchPersonalizedPreset('famille-lineart.recipe.json')
     pState.recipe = JSON.parse(JSON.stringify(preset))
-    renderRecipeSummary()
-    badge.textContent = 'preset famille chargé ✓'
+    renderRecipeForm()
     refreshAction()
   } catch (e) {
     pState.recipe = null
@@ -321,26 +331,238 @@ function renderStudioValidation() {
   badge.textContent = v.ok ? `${pState.config.steps.length} étapes · valide ✓` : `${stepErrs + v.rootErrors.length} erreur(s)`
 }
 
-/* ---------- Rendu : résumé recette (éditeur complet en P3) ---------- */
-function renderRecipeSummary() {
+/* ---------- Éditeur de recette (studio.recipe) ---------- */
+// Écrit une valeur à un chemin `a.b.c` de pState.recipe (crée les niveaux au besoin).
+function setRecipePath(path, value) {
+  const parts = path.split('.')
+  let node = pState.recipe
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (!node[parts[i]] || typeof node[parts[i]] !== 'object') node[parts[i]] = {}
+    node = node[parts[i]]
+  }
+  node[parts[parts.length - 1]] = value
+}
+const getRecipePath = (path) => path.split('.').reduce((n, p) => (n && typeof n === 'object' ? n[p] : undefined), pState.recipe)
+// Étapes de config utilisables comme entrées de recette (non-format, avec payloadKey/name).
+function configInputSteps() {
+  const steps = (pState.config && pState.config.steps) || []
+  return steps.filter((s) => s.type !== 'format').map((s) => ({ key: s.payloadKey || s.name, name: s.name, type: s.type }))
+}
+function renderRecipeForm() {
   const wrap = $('#recipeForm')
   const empty = $('#recipeEmpty')
-  wrap.innerHTML = ''
   empty.classList.toggle('hidden', !!pState.recipe)
-  if (!pState.recipe) return
+  $('#recipeVerify').classList.toggle('hidden', !pState.recipe)
+  if (!pState.recipe) { wrap.innerHTML = ''; return }
   const r = pState.recipe
-  const bits = [
-    ['Moteur', `${r.model || '—'} · ${r.aspect || '3:4'}`],
-    ['Candidats / tentatives', `${r.candidates ?? '—'} / ${r.maxAttempts ?? '—'}`],
-    ['Prompt', r.prompt && r.prompt.base ? 'base + ' + Object.keys(r.prompt).filter((k) => k !== 'base' && r.prompt[k]).length + ' fragments' : '⚠️ base manquante'],
-    ['Juge', r.judge ? Object.entries(r.judge).filter(([, v]) => v).map(([k]) => k).join(' + ') || 'désactivé' : 'défauts back'],
-  ]
-  for (const [label, value] of bits) {
-    const row = document.createElement('div')
-    row.className = 'chosen'
-    row.style.marginTop = 'var(--s2)'
-    row.innerHTML = `<span>${escapeHtml(label)}</span><span class="chosen-info">${escapeHtml(value)}</span>`
-    wrap.appendChild(row)
+  r.inputs = r.inputs || {}
+  r.reference = r.reference || { texts: {} }
+  r.reference.texts = r.reference.texts || {}
+  r.prompt = r.prompt || {}
+  r.judge = r.judge || {}
+  const inputSteps = configInputSteps()
+  const tokFrom = (r.inputs.tokens && r.inputs.tokens.from) || ''
+  const P = []
+
+  // Moteur
+  P.push('<div class="studio-sub"><p class="studio-sub-title">Moteur</p>')
+  P.push(fieldBlock('Modèle', 'Les ID « -preview » sont morts — utiliser gemini-3-pro-image.',
+    `<input type="text" data-recipe="model" value="${escapeHtml(r.model || 'gemini-3-pro-image')}">`))
+  P.push(`<div class="studio-row">
+    ${fieldBlock('Ratio', '', `<select data-recipe="aspect">${RECIPE_ASPECTS.map((a) => `<option value="${a}"${(r.aspect || '3:4') === a ? ' selected' : ''}>${a}</option>`).join('')}</select>`)}
+    ${fieldBlock('Candidats (1-4)', '', `<input type="number" data-recipe="candidates" min="1" max="4" value="${r.candidates ?? 3}">`)}
+    ${fieldBlock('Tentatives (1-3)', '', `<input type="number" data-recipe="maxAttempts" min="1" max="3" value="${r.maxAttempts ?? 2}">`)}
+  </div></div>`)
+
+  // Entrées (mapping auto depuis la config)
+  P.push('<div class="studio-sub"><p class="studio-sub-title">Entrées (depuis les étapes)</p>')
+  P.push(`<p class="sf-help">Champs de la config : ${inputSteps.map((s) => escapeHtml(s.key)).join(', ') || '—'}</p>`)
+  const tokKeys = inputSteps.filter((s) => s.type === 'text').map((s) => s.key)
+  // préserve tokFrom même si la config n'est pas (encore) chargée / ne contient pas ce champ :
+  // sinon le <select> retomberait sur "" et un ré-render effacerait inputs.tokens du preset.
+  if (tokFrom && !tokKeys.includes(tokFrom)) tokKeys.unshift(tokFrom)
+  const tokOpts = ['<option value="">Aucun (pas de prénoms multiples)</option>']
+    .concat(tokKeys.map((k) => `<option value="${escapeHtml(k)}"${tokFrom === k ? ' selected' : ''}>${escapeHtml(k)}${configInputSteps().some((s) => s.key === k) ? '' : ' (hors config)'}</option>`))
+  P.push(`<div class="studio-row">
+    ${fieldBlock('Prénoms depuis (tokens.from)', 'Champ texte découpé en prénoms.', `<select data-recipe-tokens="from">${tokOpts.join('')}</select>`)}
+    ${fieldBlock('Max prénoms (1-8)', 'Doit égaler photoPolicy.people.max.', `<input type="number" data-recipe-tokens="max" min="1" max="8" value="${(r.inputs.tokens && r.inputs.tokens.max) ?? 6}">`)}
+  </div>`)
+  P.push(fieldBlock('Titre (template)', 'Ex : La famille {familyName}. Les {champs} viennent de la config.',
+    `<input type="text" data-recipe-title="template" value="${escapeHtml((r.inputs.title && r.inputs.title.template) || '')}">`))
+  P.push('</div>')
+
+  // Référence de style
+  P.push('<div class="studio-sub"><p class="studio-sub-title">Référence de style</p>')
+  P.push(`<label class="studio-check"><input type="checkbox" id="rf-sameAsDesign" ${pState.recipeSameAsDesign ? 'checked' : ''}> Le design d’exemple (carte 1) EST la référence</label>`)
+  P.push(`<div id="rf-upload" class="${pState.recipeSameAsDesign ? 'hidden' : ''}">
+    ${fieldBlock('Image de référence', 'Image de style écrite (titre + slots).', `<input type="file" accept="image/*" id="rf-styleRef" class="decor-vibe">`)}
+    <div class="photo-ex-slot"><img id="rf-styleRef-img" src="${pState.styleRef || ''}" alt="" ${pState.styleRef ? '' : 'style="min-height:80px"'}></div>
+  </div>`)
+  P.push(fieldBlock('Titre écrit sur la référence', 'Ex : The Smith Family (source de la substitution du titre).',
+    `<input type="text" data-recipe="reference.texts.title" value="${escapeHtml(r.reference.texts.title || '')}">`))
+  P.push(fieldBlock('Textes-slots (séparés par des virgules)', 'Ex : DADDY, FRANCO, MOMMY, VERONICA.',
+    `<input type="text" id="rf-slots" value="${escapeHtml((r.reference.texts.slots || []).join(', '))}">`))
+  P.push('</div>')
+
+  // Prompt
+  P.push('<div class="studio-sub"><p class="studio-sub-title">Prompt (en anglais — Gemini suit mieux l’anglais)</p>')
+  P.push(fieldBlock('Base (obligatoire)', '', `<textarea data-recipe="prompt.base" style="min-height:120px">${escapeHtml(r.prompt.base || '')}</textarea>`))
+  P.push(fieldBlock('Par personne (perPerson)', '', `<textarea data-recipe="prompt.perPerson">${escapeHtml(r.prompt.perPerson || '')}</textarea>`))
+  P.push(fieldBlock('Pied (footer)', '', `<textarea data-recipe="prompt.footer">${escapeHtml(r.prompt.footer || '')}</textarea>`))
+  P.push(`<button type="button" class="i18n-toggle" id="rf-adv-toggle">▾ Fragments avancés</button><div id="rf-advanced" class="hidden">`)
+  for (const f of RECIPE_ADVANCED)
+    P.push(fieldBlock(f.label, '', `<textarea data-recipe="prompt.${f.key}">${escapeHtml(r.prompt[f.key] || '')}</textarea>`))
+  P.push('</div></div>')
+
+  // Juge
+  P.push('<div class="studio-sub"><p class="studio-sub-title">Juge des candidats</p>')
+  P.push(`<label class="studio-check"><input type="checkbox" data-recipe-judge="text" ${r.judge.text !== false ? 'checked' : ''}> Vérifier les textes (judge.text)</label>`)
+  P.push(`<label class="studio-check"><input type="checkbox" data-recipe-judge="figureCount" ${r.judge.figureCount !== false ? 'checked' : ''}> Vérifier le nombre de personnes (judge.figureCount)</label>`)
+  P.push('</div>')
+
+  wrap.innerHTML = P.join('')
+  wireRecipeEvents()
+  renderRecipeValidation()
+}
+function wireRecipeEvents() {
+  // champs simples liés à un chemin
+  $$('#recipeForm [data-recipe]').forEach((el) =>
+    el.addEventListener('input', () => {
+      const path = el.dataset.recipe
+      let v = el.value
+      if (path === 'candidates' || path === 'maxAttempts') v = parseInt(v, 10) || 0
+      if (path === 'reference.texts.title') v = v.trim() || null
+      setRecipePath(path, v)
+      renderRecipeValidation()
+      refreshAction()
+    })
+  )
+  // tokens (from/max) — structure inputs.tokens
+  $$('#recipeForm [data-recipe-tokens]').forEach((el) =>
+    el.addEventListener('input', () => {
+      const r = pState.recipe
+      const from = $('#recipeForm [data-recipe-tokens="from"]').value
+      const maxEl = $('#recipeForm [data-recipe-tokens="max"]')
+      if (!from) { if (r.inputs) delete r.inputs.tokens }
+      else r.inputs.tokens = { from, split: true, max: parseInt(maxEl.value, 10) || 6 }
+      renderRecipeValidation(); refreshAction()
+    })
+  )
+  // titre (inputs.title.template)
+  const titleEl = $('#recipeForm [data-recipe-title="template"]')
+  if (titleEl) titleEl.addEventListener('input', () => {
+    const tpl = titleEl.value.trim()
+    if (!tpl) delete pState.recipe.inputs.title
+    else pState.recipe.inputs.title = { template: tpl, required: true }
+    renderRecipeValidation(); refreshAction()
+  })
+  // slots
+  const slotsEl = $('#rf-slots')
+  if (slotsEl) slotsEl.addEventListener('input', () => {
+    pState.recipe.reference.texts.slots = slotsEl.value.split(',').map((s) => s.trim()).filter(Boolean)
+  })
+  // juge
+  $$('#recipeForm [data-recipe-judge]').forEach((el) =>
+    el.addEventListener('change', () => { pState.recipe.judge[el.dataset.recipeJudge] = el.checked })
+  )
+  // référence = design ?
+  const same = $('#rf-sameAsDesign')
+  if (same) same.addEventListener('change', () => {
+    pState.recipeSameAsDesign = same.checked
+    $('#rf-upload').classList.toggle('hidden', same.checked)
+    renderRecipeValidation(); refreshAction()
+  })
+  const refFile = $('#rf-styleRef')
+  if (refFile) refFile.addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0]
+    if (!f || !f.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = () => { pState.styleRef = reader.result; $('#rf-styleRef-img').src = reader.result; renderRecipeValidation(); refreshAction() }
+    reader.readAsDataURL(f)
+  })
+  // avancé
+  const advT = $('#rf-adv-toggle')
+  if (advT) advT.addEventListener('click', () => {
+    const adv = $('#rf-advanced')
+    const hidden = adv.classList.toggle('hidden')
+    advT.textContent = hidden ? '▾ Fragments avancés' : '▴ Masquer les fragments avancés'
+  })
+}
+// Validation recette côté client (règles simples ; le back re-valide via RecipeService).
+function validateRecipeClient() {
+  const errs = []
+  const r = pState.recipe
+  if (!r) return ['Recette non chargée.']
+  if (!(r.prompt && r.prompt.base && r.prompt.base.trim())) errs.push('prompt.base est obligatoire.')
+  const c = r.candidates
+  if (!(Number.isInteger(c) && c >= 1 && c <= 4)) errs.push('candidates doit être entre 1 et 4.')
+  const m = r.maxAttempts
+  if (!(Number.isInteger(m) && m >= 1 && m <= 3)) errs.push('maxAttempts doit être entre 1 et 3.')
+  if (r.inputs && r.inputs.tokens) {
+    const tm = r.inputs.tokens.max
+    if (!(Number.isInteger(tm) && tm >= 1 && tm <= 8)) errs.push('tokens.max doit être entre 1 et 8.')
+  }
+  if (r.inputs && r.inputs.title && !(r.reference && r.reference.texts && r.reference.texts.title))
+    errs.push('Un titre (template) est configuré : renseigne « Titre écrit sur la référence ».')
+  // cohérence tokens.max ↔ photoPolicy.people.max
+  if (r.inputs && r.inputs.tokens && pState.config) {
+    const photo = pState.config.steps.find((s) => s.type === 'photo')
+    const pm = photo && photo.photoPolicy && photo.photoPolicy.people && photo.photoPolicy.people.max
+    if (typeof pm === 'number' && r.inputs.tokens.max !== pm)
+      errs.push(`tokens.max (${r.inputs.tokens.max}) doit égaler photoPolicy.people.max (${pm}).`)
+  }
+  // référence obligatoire
+  if (!pState.recipeSameAsDesign && !pState.styleRef) errs.push('Image de référence obligatoire (ou coche « le design est la référence »).')
+  return errs
+}
+function renderRecipeValidation() {
+  const box = $('#recipeValidation')
+  const badge = $('#recipeBadge')
+  if (!pState.recipe) { box.classList.add('hidden'); return }
+  const errs = validateRecipeClient()
+  box.classList.remove('hidden')
+  if (!errs.length) {
+    box.className = 'studio-validation ok'
+    box.innerHTML = '✓ Recette valide.'
+    badge.textContent = 'recette valide ✓'
+  } else {
+    box.className = 'studio-validation err'
+    box.innerHTML = `✗ ${errs.length} problème(s) :<ul>${errs.map((e) => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`
+    badge.textContent = `${errs.length} problème(s)`
+  }
+}
+// Vérification serveur (validate-personalized) : config + recette + unicité slug.
+async function runServerVerify() {
+  if (!pState.config || !pState.recipe) return
+  const btn = $('#recipeVerify')
+  const box = $('#recipeVerifyResult')
+  btn.disabled = true
+  box.classList.remove('hidden')
+  box.className = 'studio-validation'
+  box.textContent = 'Vérification serveur…'
+  try {
+    const r = await fetch(API + '/api/shopify-product-publisher/validate-personalized', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        studioConfig: { ...pState.config, productType: pState.productType },
+        studioRecipe: pState.recipe,
+      }),
+    })
+    const data = await safeJson(r)
+    if (!r.ok || !data.success) throw new Error(r.status === 401 ? 'session expirée — reconnecte-toi' : data.message || 'échec (' + r.status + ')')
+    if (data.ok) {
+      box.className = 'studio-validation ok'
+      box.innerHTML = '✓ Validation serveur OK — prêt à publier.'
+    } else {
+      box.className = 'studio-validation err'
+      box.innerHTML = `✗ ${data.errors.length} erreur(s) serveur :<ul>${data.errors.slice(0, 12).map((e) => `<li>${escapeHtml(e.where + ' — ' + e.message)}</li>`).join('')}</ul>`
+    }
+  } catch (e) {
+    box.className = 'studio-validation err'
+    box.textContent = 'Vérification : ' + e.message
+  } finally {
+    btn.disabled = false
   }
 }
 
@@ -871,6 +1093,10 @@ function onConfigChanged() {
   renderStudioSteps()
   renderStudioValidation()
   renderStudioPreview()
+  // les entrées de la recette dérivent des étapes de config -> rafraîchir le formulaire recette,
+  // sauf si l'utilisateur est en train d'y taper (ne pas voler le focus).
+  if (pState.recipe && (!document.activeElement || !document.activeElement.closest('#recipeForm')))
+    renderRecipeForm()
   refreshAction()
 }
 
@@ -893,7 +1119,7 @@ function personalizedPublishGate() {
   const missing = []
   if (!pState.config) missing.push('config (choisir un preset)')
   else if (!validatePersonalizedConfig().ok) missing.push('config invalide')
-  if (!pState.recipe || !(pState.recipe.prompt && pState.recipe.prompt.base)) missing.push('recette')
+  if (!pState.recipe || validateRecipeClient().length) missing.push('recette')
   if (!PERSONALIZED_PT_RE.test(pState.productType)) missing.push('slug produit')
   if (!state.collection) missing.push('collection')
   if (!state.results.length) missing.push('≥1 rendu')
@@ -909,10 +1135,14 @@ function refreshActionPersonalized() {
 
 /* ---------- Payload publish (bloc `personalized`) ---------- */
 function buildPersonalizedPublishBlock() {
-  // P4 complètera (templateSuffix, référence de style, shortTitle). Le back re-valide tout.
+  // P4 complètera côté back (templateSuffix, shortTitle). Le back re-valide TOUT (défense en profondeur).
   return {
     studioConfig: pState.config ? { ...pState.config, productType: pState.productType } : null,
     studioRecipe: pState.recipe,
+    reference: {
+      sameAsDesign: pState.recipeSameAsDesign,
+      base64Image: pState.recipeSameAsDesign ? null : pState.styleRef,
+    },
     photoExamples: {
       good: pState.photoExamples.good ? { base64Image: pState.photoExamples.good } : null,
       bad: pState.photoExamples.bad ? { base64Image: pState.photoExamples.bad } : null,
@@ -935,6 +1165,7 @@ if (IS_PERSONALIZED) {
   $('#studioPreset').addEventListener('change', (e) => { if (e.target.value) loadConfigPreset(e.target.value) })
   $('#studioAddStep').addEventListener('click', openTypePicker)
   $('#studioTranslateAll').addEventListener('click', translateAll)
+  $('#recipeVerify').addEventListener('click', runServerVerify)
   $('#studioStepSave').addEventListener('click', saveStepEditor)
   $('#studioStepCancel').addEventListener('click', closeStepEditor)
   $('#studioTypeCancel').addEventListener('click', () => $('#studioTypeOverlay').classList.add('hidden'))
