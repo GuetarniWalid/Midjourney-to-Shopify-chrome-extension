@@ -2673,6 +2673,16 @@ $('#publishBtn').addEventListener('click', async () => {
       progress.done('Images remplacées ✓', link)
       $('#progressMsg').textContent = 'Le nettoyage des anciennes images se termine en arrière-plan (~1 min).'
       resetReimageSession() // session entièrement réinitialisée (produit, image, rendus, clé)
+    } else if (IS_PERSONALIZED) {
+      // Produit créé en BROUILLON : le lien pointe vers l'admin (à tester puis activer).
+      progress.done('Brouillon créé ✓', link)
+      $('#progressLink').textContent = 'Ouvrir dans l’admin'
+      const warns = (data.data && data.data.warnings) || []
+      $('#progressMsg').textContent =
+        (data.data && data.data.reminder) ||
+        'Produit créé en brouillon. Teste le studio puis active-le.'
+      if (warns.length) $('#progressMsg').textContent += ' ⚠️ ' + warns.join(' · ')
+      clearResults()
     } else {
       progress.done('Produit publié ✓', link)
       // on retire les rendus publiés (nouvelle session propre)
