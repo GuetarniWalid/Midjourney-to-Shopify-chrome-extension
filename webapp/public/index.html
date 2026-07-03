@@ -104,6 +104,20 @@
       </div>
       <div id="studioSteps" class="studio-steps"></div>
       <p id="studioEmpty" class="empty">Choisissez un preset : les étapes du parcours client se chargeront ici.</p>
+      <button id="studioAddStep" class="ghost-btn hidden">＋ Ajouter une étape</button>
+      <div id="studioTranslateWrap" class="studio-translate-wrap hidden">
+        <button id="studioTranslateAll" class="ghost-btn">🌍 Traduire tout (EN/DE/NL/ES)</button>
+        <span id="studioTranslateHint" class="hint"></span>
+      </div>
+      <div id="studioValidation" class="studio-validation hidden"></div>
+      <div id="studioPreviewWrap" class="studio-preview-wrap hidden">
+        <div class="pp-head">
+          <h3 class="card-subtitle">Aperçu du parcours client</h3>
+          <div id="studioPreviewLangs" class="studio-preview-langs"></div>
+        </div>
+        <div id="studioPreviewStepper" class="studio-preview-stepper"></div>
+        <div id="studioPreviewBody" class="studio-preview-body"></div>
+      </div>
     </section>
 
     <!-- 4. Recette IA (mode « poster personnalisé » uniquement).
@@ -303,6 +317,29 @@
     </div>
   </div>
 
+  <!-- Overlay d'édition d'une étape studio (mode personalized) — corps construit par personalized.js -->
+  <div id="studioStepOverlay" class="resize-overlay hidden">
+    <div class="resize-card">
+      <h3 id="studioStepTitle">Modifier l'étape</h3>
+      <div id="studioStepBody" class="studio-step-body"></div>
+      <div class="resize-actions">
+        <button id="studioStepSave" class="primary-btn">Enregistrer</button>
+        <button id="studioStepCancel" class="ghost-btn">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay « Ajouter une étape » : choix du type (mode personalized) -->
+  <div id="studioTypeOverlay" class="resize-overlay hidden">
+    <div class="resize-card">
+      <h3>Ajouter une étape</h3>
+      <div id="studioTypeList" class="section-list"></div>
+      <div class="resize-actions">
+        <button id="studioTypeCancel" class="ghost-btn">Annuler</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Overlay de progression (publication) -->
   <div id="progress" class="progress-overlay hidden">
     <div class="progress-card">
@@ -319,6 +356,7 @@
      Quand la page est servie par le backend, celui-ci remplace cette config (voir publisher.edge). -->
 <script>window.PUBLISHER_CONFIG = window.PUBLISHER_CONFIG || { renderBase: '', apiBase: '' };</script>
 <script src="app.js"></script>
+<script src="lib/validate-studio-config.js"></script>
 <script src="personalized.js"></script>
 </body>
 </html>

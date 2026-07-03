@@ -29,6 +29,15 @@ for (const f of fs.readdirSync(PRESETS_SRC).filter((f) => f.endsWith('.json'))) 
   console.log(`copié  presets/${f}`)
 }
 
+// --- 1c. lib/ (validateur studio copié du thème) — copie byte-identique + versionné dans l'edge ---
+const LIB_SRC = path.join(FRONT, 'lib')
+const LIB_DST = path.join(MIRROR, 'lib')
+fs.mkdirSync(LIB_DST, { recursive: true })
+for (const f of fs.readdirSync(LIB_SRC).filter((f) => f.endsWith('.js'))) {
+  fs.copyFileSync(path.join(LIB_SRC, f), path.join(LIB_DST, f))
+  console.log(`copié  lib/${f}`)
+}
+
 // --- 2. publisher.edge régénéré depuis index.html ---
 // Cache-busting : les assets prod partent avec Cache-Control: max-age=14400 (4 h) -> sans
 // version dans l'URL, les téléphones gardent l'ANCIEN app.js après un déploiement (bouton
@@ -65,7 +74,13 @@ const edgeConfig = [
 ].join('\n')
 html = html.replace(configAnchor, edgeConfig)
 
-// personalized.js : hors du bloc de config (il suit app.js) -> substitution dédiée, versionnée
+// validateur studio + personalized.js : hors du bloc de config (ils suivent app.js) ->
+// substitutions dédiées, versionnées (cache-busting comme app.js).
+const vValidator = sha10(path.join('lib', 'validate-studio-config.js'))
+const validatorLocal = '<script src="lib/validate-studio-config.js"></script>'
+if (!html.includes(validatorLocal)) throw new Error('balise validate-studio-config.js introuvable dans index.html')
+html = html.replace(validatorLocal, `<script src="/publisher/lib/validate-studio-config.js?v=${vValidator}"></script>`)
+
 const vPers = sha10('personalized.js')
 const persLocal = '<script src="personalized.js"></script>'
 if (!html.includes(persLocal)) throw new Error('balise personalized.js introuvable dans index.html')
