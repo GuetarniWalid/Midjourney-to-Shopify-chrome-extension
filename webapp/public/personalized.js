@@ -198,6 +198,12 @@ async function loadConfigPreset(id) {
     pState.config = JSON.parse(JSON.stringify(preset))
     // le slug du preset n'est JAMAIS repris (unique par produit) : Walid saisit le sien
     delete pState.config.productType
+    // Changer de preset = repartir de zéro : on oublie les exemples photo et la référence de style
+    // uploadés pour le preset PRÉCÉDENT (sinon ils fuiraient dans un preset sans étape photo ->
+    // fichiers Shopify orphelins à la publication).
+    pState.photoExamples = { good: null, bad: null }
+    pState.styleRef = null
+    pState.recipeSameAsDesign = true
     pState.previewStepName = pState.config.steps[0] && pState.config.steps[0].name
     onConfigChanged()
     $('#studioAddStep').classList.remove('hidden')
@@ -504,12 +510,25 @@ function validateRecipeClient() {
   }
   if (r.inputs && r.inputs.title && !(r.reference && r.reference.texts && r.reference.texts.title))
     errs.push('Un titre (template) est configuré : renseigne « Titre écrit sur la référence ».')
-  // cohérence tokens.max ↔ photoPolicy.people.max
-  if (r.inputs && r.inputs.tokens && pState.config) {
-    const photo = pState.config.steps.find((s) => s.type === 'photo')
-    const pm = photo && photo.photoPolicy && photo.photoPolicy.people && photo.photoPolicy.people.max
-    if (typeof pm === 'number' && r.inputs.tokens.max !== pm)
-      errs.push(`tokens.max (${r.inputs.tokens.max}) doit égaler photoPolicy.people.max (${pm}).`)
+  // cohérence recette ↔ config (clés d'entrée = payloadKey des étapes non-format)
+  if (pState.config) {
+    const inputKeys = new Set(configInputSteps().map((s) => s.key))
+    // tokens.max ↔ photoPolicy.people.max
+    if (r.inputs && r.inputs.tokens) {
+      const photo = pState.config.steps.find((s) => s.type === 'photo')
+      const pm = photo && photo.photoPolicy && photo.photoPolicy.people && photo.photoPolicy.people.max
+      if (typeof pm === 'number' && r.inputs.tokens.max !== pm)
+        errs.push(`tokens.max (${r.inputs.tokens.max}) doit égaler photoPolicy.people.max (${pm}).`)
+      // tokens.from doit pointer vers une étape existante (sinon découpage prénoms cassé à la commande)
+      if (r.inputs.tokens.from && !inputKeys.has(r.inputs.tokens.from))
+        errs.push(`« Prénoms depuis » (${r.inputs.tokens.from}) ne correspond à aucune étape — corrige le mapping.`)
+    }
+    // chaque {champ} du template de titre doit pointer vers une étape existante
+    const tpl = r.inputs && r.inputs.title && r.inputs.title.template
+    if (tpl) {
+      for (const m2 of String(tpl).matchAll(/\{([^{}]+)\}/g))
+        if (!inputKeys.has(m2[1])) errs.push(`Le champ « {${m2[1]}} » du titre ne correspond à aucune étape.`)
+    }
   }
   // référence obligatoire
   if (!pState.recipeSameAsDesign && !pState.styleRef) errs.push('Image de référence obligatoire (ou coche « le design est la référence »).')
@@ -1135,7 +1154,10 @@ function refreshActionPersonalized() {
 
 /* ---------- Payload publish (bloc `personalized`) ---------- */
 function buildPersonalizedPublishBlock() {
-  // P4 complètera côté back (templateSuffix, shortTitle). Le back re-valide TOUT (défense en profondeur).
+  // Le back re-valide TOUT (défense en profondeur). Les exemples photo ne partent QUE si la config
+  // a réellement une étape photo (sinon fichiers Shopify orphelins, sans step examples.* pour les
+  // référencer).
+  const hasPhoto = !!(pState.config && (pState.config.steps || []).some((s) => s.type === 'photo'))
   return {
     studioConfig: pState.config ? { ...pState.config, productType: pState.productType } : null,
     studioRecipe: pState.recipe,
@@ -1144,8 +1166,8 @@ function buildPersonalizedPublishBlock() {
       base64Image: pState.recipeSameAsDesign ? null : pState.styleRef,
     },
     photoExamples: {
-      good: pState.photoExamples.good ? { base64Image: pState.photoExamples.good } : null,
-      bad: pState.photoExamples.bad ? { base64Image: pState.photoExamples.bad } : null,
+      good: hasPhoto && pState.photoExamples.good ? { base64Image: pState.photoExamples.good } : null,
+      bad: hasPhoto && pState.photoExamples.bad ? { base64Image: pState.photoExamples.bad } : null,
     },
   }
 }
