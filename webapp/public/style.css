@@ -292,7 +292,9 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .section-inline label{font-size:13px;font-weight:600;color:var(--muted)}
 
 /* ---- toast ---- */
-.toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:60;
+/* z-index AU-DESSUS de tout (overlays 75, progress 90) : un toast émis pendant qu'un overlay
+   est ouvert doit rester visible — sinon les erreurs y sont silencieuses. */
+.toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:120;
   background:var(--text);color:#fff;padding:12px 16px;border-radius:var(--r-md);box-shadow:var(--shadow-md);font-size:14px;font-weight:500;max-width:90%;
   animation:fade var(--dur-ui) var(--ease-out)}
 .toast.ok{box-shadow:var(--shadow-md),inset 3px 0 0 var(--ok)}

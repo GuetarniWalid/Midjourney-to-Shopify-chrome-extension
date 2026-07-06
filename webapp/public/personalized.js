@@ -657,14 +657,12 @@ function renderPhotoExamplesEditor(s) {
   // IMAGE PAR IMAGE : chaque slot se génère, se valide et se remplace INDÉPENDAMMENT
   // (une bonne image gardée n'est jamais regénérée parce que l'autre a raté). La consigne
   // optionnelle est réécrite en vrai prompt par le backend (comme « salon marocain » -> décor).
+  // Le feedback de génération vit SUR le bouton cliqué (libellé + désactivation) : l'overlay
+  // scrolle et un spinner placé ailleurs sort du champ de vision -> « il ne se passe rien ».
   const slot = (kind, src, label, ph) =>
     `<div class="photo-ex-slot">
       <label>${label}</label>
       <img id="sf-ex-${kind}-img" src="${src || ''}" alt="" ${src ? '' : 'style="min-height:90px"'}>
-      <div id="sf-ex-${kind}-busy" class="resize-loading hidden">
-        <div class="progress-ring"></div>
-        <p>Génération… (~10-20s)</p>
-      </div>
       <input type="text" id="sf-ex-${kind}-wish" class="decor-vibe" maxlength="300" placeholder="${ph}">
       <div class="resize-actions" id="sf-ex-${kind}-idle">
         <button type="button" class="ghost-btn" id="sf-ex-${kind}-gen">✨ Générer par IA</button>
@@ -742,15 +740,23 @@ function photoExamplesPolicyOf(step) {
     rejectAngles: rejects,
   }
 }
-// Génère UNE image (bonne OU à éviter) ; la consigne du slot est réécrite côté back.
+// Génère UNE image (bonne OU à éviter) ; la consigne du slot (OPTIONNELLE — vide = tout
+// automatique depuis le design) est réécrite côté back. Feedback SUR le bouton cliqué.
 async function generateOneExample(step, kind) {
   if (!state.imageDataUrl) return toast("Ajoute d'abord ton design (carte 1) — les exemples en dérivent.", 'err')
   if (state.needsResize) return toast("Retaille d'abord l'image au bon format.", 'err')
   const el = (suffix) => $(`#sf-ex-${kind}-${suffix}`)
   const token = (exGenToken[kind] = {})
-  el('busy').classList.remove('hidden')
-  el('idle').classList.add('hidden')
+  // pendant la génération : le bouton Générer reste À SA PLACE, désactivé, libellé parlant
   el('pending').classList.add('hidden')
+  el('idle').classList.remove('hidden')
+  const gen = el('gen')
+  gen.disabled = true
+  gen.textContent = '⏳ Génération en cours… (~15 s)'
+  const restoreGen = () => {
+    const g = el('gen')
+    if (g) { g.disabled = false; g.textContent = '✨ Générer par IA' }
+  }
   try {
     const wishEl = el('wish')
     const image = await callPhotoExamplesJob({
@@ -759,19 +765,22 @@ async function generateOneExample(step, kind) {
       intent: (wishEl && wishEl.value.trim()) || undefined,
       policy: photoExamplesPolicyOf(step),
     })
-    // périmé (éditeur re-rendu / relance) ou DOM disparu -> on jette sans toucher l'UI
+    // périmé (éditeur re-rendu / relance / upload) ou DOM disparu -> on jette sans toucher l'UI
     if (token !== exGenToken[kind] || !el('img')) return
+    restoreGen()
     pendingExample[kind] = image
     el('img').src = image
-    el('busy').classList.add('hidden')
+    el('idle').classList.add('hidden')
     el('pending').classList.remove('hidden')
   } catch (e) {
     toast('Exemple : ' + e.message, 'err')
     if (token !== exGenToken[kind] || !el('img')) return
-    el('busy').classList.add('hidden')
+    restoreGen()
     // retour à l'état d'avant la tentative (proposition précédente ou image gardée)
-    if (pendingExample[kind]) el('pending').classList.remove('hidden')
-    else el('idle').classList.remove('hidden')
+    if (pendingExample[kind]) {
+      el('idle').classList.add('hidden')
+      el('pending').classList.remove('hidden')
+    }
   }
 }
 // Câble les events du corps de l'éditeur (une fois rendu).
@@ -812,8 +821,9 @@ function wireStepEditorEvents() {
         exGenToken[kind] = {} // périme une génération en vol sur ce slot
         pendingExample[kind] = null
         el('pending').classList.add('hidden')
-        el('busy').classList.add('hidden')
         el('idle').classList.remove('hidden')
+        const g = el('gen')
+        if (g) { g.disabled = false; g.textContent = '✨ Générer par IA' }
         pState.photoExamples[kind] = reader.result
         el('img').src = reader.result
       }
