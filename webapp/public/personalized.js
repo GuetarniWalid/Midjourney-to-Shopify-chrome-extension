@@ -593,7 +593,10 @@ async function runServerVerify() {
 /* ---------- Éditeur d'étape (overlay) ---------- */
 function openStepEditor(index) {
   const step = pState.config.steps[index]
-  pendingExamples = null // une proposition IA non validée d'une session précédente ne survit pas
+  // une proposition IA non validée d'une session précédente ne survit pas (par slot)
+  pendingExample.good = pendingExample.bad = null
+  exGenToken.good = {}
+  exGenToken.bad = {}
   pState.editing = { index, working: JSON.parse(JSON.stringify(step)) }
   $('#studioStepTitle').textContent = `Modifier « ${t(step.title, 'fr') || step.name} »`
   renderStepEditorBody()
@@ -651,30 +654,39 @@ function renderPhotoPolicyEditor(s) {
   </div>`
 }
 function renderPhotoExamplesEditor(s) {
-  const goodSrc = pState.photoExamples.good || null
-  const badSrc = pState.photoExamples.bad || null
-  const slot = (kind, src, label) =>
+  // IMAGE PAR IMAGE : chaque slot se génère, se valide et se remplace INDÉPENDAMMENT
+  // (une bonne image gardée n'est jamais regénérée parce que l'autre a raté). La consigne
+  // optionnelle est réécrite en vrai prompt par le backend (comme « salon marocain » -> décor).
+  const slot = (kind, src, label, ph) =>
     `<div class="photo-ex-slot">
       <label>${label}</label>
       <img id="sf-ex-${kind}-img" src="${src || ''}" alt="" ${src ? '' : 'style="min-height:90px"'}>
+      <div id="sf-ex-${kind}-busy" class="resize-loading hidden">
+        <div class="progress-ring"></div>
+        <p>Génération… (~10-20s)</p>
+      </div>
+      <input type="text" id="sf-ex-${kind}-wish" class="decor-vibe" maxlength="300" placeholder="${ph}">
+      <div class="resize-actions" id="sf-ex-${kind}-idle">
+        <button type="button" class="ghost-btn" id="sf-ex-${kind}-gen">✨ Générer par IA</button>
+      </div>
+      <div class="resize-actions hidden" id="sf-ex-${kind}-pending">
+        <button type="button" class="primary-btn" id="sf-ex-${kind}-accept">Garder ✓</button>
+        <button type="button" class="ghost-btn" id="sf-ex-${kind}-regen">↻ Une autre</button>
+        <button type="button" class="ghost-btn" id="sf-ex-${kind}-reject">✕</button>
+      </div>
       <input type="file" accept="image/*" id="sf-ex-${kind}" class="decor-vibe">
     </div>`
   return `<div class="studio-sub"><p class="studio-sub-title">Exemples photo</p>
-    <div class="photo-ex">${slot('good', goodSrc, 'Bonne photo')}${slot('bad', badSrc, 'Photo à éviter')}</div>
-    <button type="button" class="ghost-btn" id="sf-ex-generate">✨ Générer les 2 exemples par IA (selon votre design)</button>
-    <div id="sf-ex-loading" class="resize-loading hidden">
-      <div class="progress-ring"></div>
-      <p id="sf-ex-loading-msg">Génération des exemples… (~20-40s)</p>
-    </div>
-    <div id="sf-ex-pending" class="resize-actions hidden">
-      <button type="button" class="primary-btn" id="sf-ex-accept">Utiliser ces exemples ✓</button>
-      <button type="button" class="ghost-btn" id="sf-ex-regen">↻ Régénérer</button>
-      <button type="button" class="ghost-btn" id="sf-ex-reject">✕ Annuler</button>
+    <div class="photo-ex">
+      ${slot('good', pState.photoExamples.good, 'Bonne photo', 'Consigne (optionnel) — ex. deux personnes vues de dos')}
+      ${slot('bad', pState.photoExamples.bad, 'Photo à éviter', 'Consigne (optionnel) — ex. jambes coupées, photo sombre')}
     </div>
   </div>`
 }
-// Proposition IA en attente (bonne+mauvaise) — validée/refusée avant d'entrer dans pState.
-let pendingExamples = null
+// Propositions IA en attente, PAR image — validées/refusées indépendamment avant pState.
+const pendingExample = { good: null, bad: null }
+// Jetons anti-péremption par slot (re-render de l'éditeur / relance pendant une génération).
+const exGenToken = { good: null, bad: null }
 // Job asynchrone (même patron anti-524 que le décor : start -> polling).
 async function callPhotoExamplesJob(body) {
   let startRes, startData
@@ -712,7 +724,7 @@ async function callPhotoExamplesJob(body) {
     netErrors = 0
     if (res.status === 404 || data.status === 'not_found') throw new Error('Session de génération expirée. Relance.')
     if (data.status === 'error') throw new Error(data.message || 'Échec de la génération.')
-    if (data.status === 'done' && data.data && data.data.good && data.data.bad) return data.data
+    if (data.status === 'done' && data.data && data.data.image) return data.data.image
   }
 }
 // Règles envoyées au générateur : dérivées de la photoPolicy de l'étape (déterministe).
@@ -730,28 +742,36 @@ function photoExamplesPolicyOf(step) {
     rejectAngles: rejects,
   }
 }
-async function generatePhotoExamples(step) {
+// Génère UNE image (bonne OU à éviter) ; la consigne du slot est réécrite côté back.
+async function generateOneExample(step, kind) {
   if (!state.imageDataUrl) return toast("Ajoute d'abord ton design (carte 1) — les exemples en dérivent.", 'err')
   if (state.needsResize) return toast("Retaille d'abord l'image au bon format.", 'err')
-  const btn = $('#sf-ex-generate')
-  btn.disabled = true
-  $('#sf-ex-loading').classList.remove('hidden')
-  $('#sf-ex-pending').classList.add('hidden')
+  const el = (suffix) => $(`#sf-ex-${kind}-${suffix}`)
+  const token = (exGenToken[kind] = {})
+  el('busy').classList.remove('hidden')
+  el('idle').classList.add('hidden')
+  el('pending').classList.add('hidden')
   try {
-    const { good, bad } = await callPhotoExamplesJob({
+    const wishEl = el('wish')
+    const image = await callPhotoExamplesJob({
       artwork: state.imageDataUrl,
+      kind,
+      intent: (wishEl && wishEl.value.trim()) || undefined,
       policy: photoExamplesPolicyOf(step),
     })
-    pendingExamples = { good, bad }
-    // proposition affichée dans les slots ; validée seulement via « Utiliser »
-    $('#sf-ex-good-img').src = good
-    $('#sf-ex-bad-img').src = bad
-    $('#sf-ex-pending').classList.remove('hidden')
+    // périmé (éditeur re-rendu / relance) ou DOM disparu -> on jette sans toucher l'UI
+    if (token !== exGenToken[kind] || !el('img')) return
+    pendingExample[kind] = image
+    el('img').src = image
+    el('busy').classList.add('hidden')
+    el('pending').classList.remove('hidden')
   } catch (e) {
-    toast('Exemples : ' + e.message, 'err')
-  } finally {
-    $('#sf-ex-loading').classList.add('hidden')
-    btn.disabled = false
+    toast('Exemple : ' + e.message, 'err')
+    if (token !== exGenToken[kind] || !el('img')) return
+    el('busy').classList.add('hidden')
+    // retour à l'état d'avant la tentative (proposition précédente ou image gardée)
+    if (pendingExample[kind]) el('pending').classList.remove('hidden')
+    else el('idle').classList.remove('hidden')
   }
 }
 // Câble les events du corps de l'éditeur (une fois rendu).
@@ -777,41 +797,43 @@ function wireStepEditorEvents() {
       btn.classList.add('on')
     })
   )
-  // exemples photo (base64 en attente) — un upload manuel annule une proposition IA en cours
+  // exemples photo — IMAGE PAR IMAGE : générer / garder / une autre / annuler / uploader,
+  // chaque slot vit sa vie (une image validée n'est jamais perdue par l'échec de l'autre).
   for (const kind of ['good', 'bad']) {
+    const el = (suffix) => $(`#sf-ex-${kind}-${suffix}`)
     const inp = $(`#sf-ex-${kind}`)
     if (!inp) continue
+    // upload manuel : adopte directement l'image et annule toute proposition IA du slot
     inp.addEventListener('change', (e) => {
       const f = e.target.files && e.target.files[0]
       if (!f || !f.type.startsWith('image/')) return
       const reader = new FileReader()
       reader.onload = () => {
-        pendingExamples = null
-        $('#sf-ex-pending').classList.add('hidden')
+        exGenToken[kind] = {} // périme une génération en vol sur ce slot
+        pendingExample[kind] = null
+        el('pending').classList.add('hidden')
+        el('busy').classList.add('hidden')
+        el('idle').classList.remove('hidden')
         pState.photoExamples[kind] = reader.result
-        $(`#sf-ex-${kind}-img`).src = reader.result
+        el('img').src = reader.result
       }
       reader.readAsDataURL(f)
     })
-  }
-  // génération IA des 2 exemples + accepter / régénérer / annuler la proposition
-  const genBtn = $('#sf-ex-generate')
-  if (genBtn) {
-    genBtn.addEventListener('click', () => generatePhotoExamples(s))
-    $('#sf-ex-accept').addEventListener('click', () => {
-      if (!pendingExamples) return
-      pState.photoExamples = { good: pendingExamples.good, bad: pendingExamples.bad }
-      pendingExamples = null
-      $('#sf-ex-pending').classList.add('hidden')
-      toast('Exemples adoptés ✓', 'ok')
+    el('gen').addEventListener('click', () => generateOneExample(s, kind))
+    el('accept').addEventListener('click', () => {
+      if (!pendingExample[kind]) return
+      pState.photoExamples[kind] = pendingExample[kind]
+      pendingExample[kind] = null
+      el('pending').classList.add('hidden')
+      el('idle').classList.remove('hidden')
+      toast('Image gardée ✓', 'ok')
     })
-    $('#sf-ex-regen').addEventListener('click', () => generatePhotoExamples(s))
-    $('#sf-ex-reject').addEventListener('click', () => {
-      pendingExamples = null
-      $('#sf-ex-pending').classList.add('hidden')
-      // retour aux exemples adoptés (ou vide)
-      $('#sf-ex-good-img').src = pState.photoExamples.good || ''
-      $('#sf-ex-bad-img').src = pState.photoExamples.bad || ''
+    el('regen').addEventListener('click', () => generateOneExample(s, kind))
+    el('reject').addEventListener('click', () => {
+      pendingExample[kind] = null
+      el('pending').classList.add('hidden')
+      el('idle').classList.remove('hidden')
+      el('img').src = pState.photoExamples[kind] || ''
     })
   }
 }
