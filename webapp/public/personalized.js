@@ -447,6 +447,29 @@ function configInputSteps() {
   const steps = (pState.config && pState.config.steps) || []
   return steps.filter((s) => s.type !== 'format').map((s) => ({ key: s.payloadKey || s.name, name: s.name, type: s.type }))
 }
+// Mapping AUTOMATIQUE des prénoms (inputs.tokens) depuis les étapes — aucune décision humaine :
+// l'étape « Prénoms (liste) » (memberNames*) est la source ; à défaut « Prénom » (firstName*) ;
+// sans étape prénoms, pas de tokens. Le max suit « Personnes max » du juge photo. Un tokens.from
+// encore valide (préréglage famille) est conservé ; un renommage/suppression d'étape se répare seul.
+function syncRecipeTokens(r) {
+  const steps = (pState.config && pState.config.steps) || []
+  const keyOf = (s) => s.payloadKey || s.name
+  const textSteps = steps.filter((s) => s.type === 'text')
+  const current = r.inputs && r.inputs.tokens && r.inputs.tokens.from
+  const currentOk = current && steps.some((s) => s.type !== 'format' && keyOf(s) === current)
+  const multi = textSteps.find((s) => /^memberNames/.test(s.name))
+  const single = textSteps.find((s) => /^firstName/.test(s.name))
+  const from = currentOk ? current : multi ? keyOf(multi) : single ? keyOf(single) : null
+  if (!from) {
+    if (r.inputs) delete r.inputs.tokens
+    return null
+  }
+  const photo = steps.find((s) => s.type === 'photo')
+  const pm = photo && photo.photoPolicy && photo.photoPolicy.people && photo.photoPolicy.people.max
+  const max = typeof pm === 'number' ? pm : (r.inputs.tokens && r.inputs.tokens.max) || 6
+  r.inputs.tokens = { from, split: true, max }
+  return r.inputs.tokens
+}
 function renderRecipeForm() {
   const wrap = $('#recipeForm')
   const empty = $('#recipeEmpty')
@@ -459,35 +482,19 @@ function renderRecipeForm() {
   r.reference.texts = r.reference.texts || {}
   r.prompt = r.prompt || {}
   r.judge = r.judge || {}
-  const inputSteps = configInputSteps()
-  const tokFrom = (r.inputs.tokens && r.inputs.tokens.from) || ''
   const P = []
 
   // Moteur : PAS d'UI — mêmes réglages pour tous les produits. Le ratio est déduit de l'image
   // (carte 1) ; modèle/versions/essais gardent les défauts du preset (gemini-3-pro-image, 3, 2).
   r.aspect = recipeAspectFromImage()
 
-  // Entrées (mapping auto depuis la config)
-  P.push('<div class="studio-sub"><p class="studio-sub-title">Entrées (depuis les étapes)</p>')
-  P.push(`<p class="sf-help">Champs de la config : ${inputSteps.map((s) => escapeHtml(s.key)).join(', ') || '—'}</p>`)
-  const tokKeys = inputSteps.filter((s) => s.type === 'text').map((s) => s.key)
-  // préserve tokFrom même si la config n'est pas (encore) chargée / ne contient pas ce champ :
-  // sinon le <select> retomberait sur "" et un ré-render effacerait inputs.tokens du preset.
-  if (tokFrom && !tokKeys.includes(tokFrom)) tokKeys.unshift(tokFrom)
-  const tokOpts = ['<option value="">Aucun (pas de prénoms multiples)</option>']
-    .concat(tokKeys.map((k) => `<option value="${escapeHtml(k)}"${tokFrom === k ? ' selected' : ''}>${escapeHtml(k)}${configInputSteps().some((s) => s.key === k) ? '' : ' (hors config)'}</option>`))
-  // « Max prénoms » SYNCHRONISÉ sur « Personnes max » du juge photo (une seule source de vérité :
-  // la validation exige de toute façon l'égalité — autant la faire automatiquement).
-  const photoStepCfg = pState.config && (pState.config.steps || []).find((s) => s.type === 'photo')
-  const peopleMaxCfg = photoStepCfg && photoStepCfg.photoPolicy && photoStepCfg.photoPolicy.people && photoStepCfg.photoPolicy.people.max
-  if (typeof peopleMaxCfg === 'number' && r.inputs.tokens) r.inputs.tokens.max = peopleMaxCfg
-  const tokMaxLocked = typeof peopleMaxCfg === 'number'
-  P.push(`<div class="studio-row">
-    ${fieldBlock('Prénoms depuis (tokens.from)', 'Champ texte découpé en prénoms.', `<select data-recipe-tokens="from">${tokOpts.join('')}</select>`)}
-    ${fieldBlock('Max prénoms (1-8)', tokMaxLocked ? '= « Personnes max » du juge photo (synchronisé automatiquement).' : 'Nombre max de prénoms nommables sur le dessin.', `<input type="number" data-recipe-tokens="max" min="1" max="8" value="${(r.inputs.tokens && r.inputs.tokens.max) ?? 6}"${tokMaxLocked ? ' disabled' : ''}>`)}
-  </div>`)
-  P.push(fieldBlock('Titre (template)', 'Ex : La famille {familyName}. Les {champs} viennent de la config.',
-    `<input type="text" data-recipe-title="template" value="${escapeHtml((r.inputs.title && r.inputs.title.template) || '')}">`))
+  // Entrées : mapping 100 % AUTOMATIQUE et SILENCIEUX — les prénoms viennent de l'étape
+  // « Prénoms (liste) » (ou « Prénom »), le max suit le juge photo. Seul l'actionnable est
+  // affiché : le TITRE peint sur le poster.
+  syncRecipeTokens(r)
+  const titleKeys = configInputSteps().filter((s) => s.type !== 'photo').map((s) => `{${s.key}}`)
+  P.push('<div class="studio-sub"><p class="studio-sub-title">Titre peint sur le poster</p>')
+  P.push(`<div class="studio-field"><input type="text" data-recipe-title="template" value="${escapeHtml((r.inputs.title && r.inputs.title.template) || '')}"><p class="sf-help">Champs utilisables : ${escapeHtml(titleKeys.join(' ') || '—')}.</p></div>`)
   P.push('</div>')
 
   // Référence de style
@@ -537,17 +544,7 @@ function wireRecipeEvents() {
       refreshAction()
     })
   )
-  // tokens (from/max) — structure inputs.tokens
-  $$('#recipeForm [data-recipe-tokens]').forEach((el) =>
-    el.addEventListener('input', () => {
-      const r = pState.recipe
-      const from = $('#recipeForm [data-recipe-tokens="from"]').value
-      const maxEl = $('#recipeForm [data-recipe-tokens="max"]')
-      if (!from) { if (r.inputs) delete r.inputs.tokens }
-      else r.inputs.tokens = { from, split: true, max: parseInt(maxEl.value, 10) || 6 }
-      renderRecipeValidation(); refreshAction()
-    })
-  )
+  // (inputs.tokens : plus aucune UI — synchronisé silencieusement par syncRecipeTokens)
   // titre (inputs.title.template)
   const titleEl = $('#recipeForm [data-recipe-title="template"]')
   if (titleEl) titleEl.addEventListener('input', () => {
@@ -593,6 +590,8 @@ function validateRecipeClient() {
   const errs = []
   const r = pState.recipe
   if (!r) return ['Recette non chargée.']
+  // auto-réparation AVANT contrôle : le mapping des prénoms suit toujours les étapes courantes
+  if (r.inputs) syncRecipeTokens(r)
   if (!(r.prompt && r.prompt.base && r.prompt.base.trim())) errs.push('prompt.base est obligatoire.')
   const c = r.candidates
   if (!(Number.isInteger(c) && c >= 1 && c <= 4)) errs.push('candidates doit être entre 1 et 4.')
