@@ -65,8 +65,10 @@ const pState = {
   previewStepName: null,
   editing: null, // { index, working } pendant l'édition d'une étape
 }
-// Bornes recette (miroir de RecipeService côté back)
-const RECIPE_ASPECTS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
+// Ratio de la recette DÉDUIT de l'image (carte 1), comme partout dans l'app :
+// portrait -> 3:4, paysage -> 4:3, carré -> 1:1 (pas d'image encore = 3:4, le cas nominal poster).
+const recipeAspectFromImage = () =>
+  state.orientation === 'landscape' ? '4:3' : state.orientation === 'square' ? '1:1' : '3:4'
 const RECIPE_ADVANCED = [
   { key: 'imageRoles', label: 'Rôles des images (image 1 = photo, image 2 = référence)' },
   { key: 'countLine', label: 'Ligne de comptage ({n}, {tokens})' },
@@ -269,9 +271,10 @@ function validatePersonalizedConfig() {
   if (hasPhoto && !(cfg.payload && cfg.payload.extra && cfg.payload.extra.consent === '1'))
     rootErrors.push('payload.extra.consent = "1" obligatoire dès qu’une étape photo existe (consentement).')
 
-  // 4) slug productType (unicité vérifiée côté back en P3)
-  if (!PERSONALIZED_PT_RE.test(pState.productType))
-    rootErrors.push('Slug produit (productType) manquant ou invalide (minuscules/chiffres/tirets).')
+  // 4) slug productType : OPTIONNEL (vide = généré automatiquement à la publication depuis le
+  // titre IA). S'il est saisi, il doit être conforme (unicité vérifiée côté back).
+  if (pState.productType && !PERSONALIZED_PT_RE.test(pState.productType))
+    rootErrors.push('Nom de code invalide (minuscules/chiffres/tirets) — ou laisse le champ vide.')
 
   const stepErrCount = [...byStep.values()].reduce((n, a) => n + a.length, 0)
   return { ok: rootErrors.length === 0 && stepErrCount === 0, byStep, rootErrors, warnings }
@@ -370,15 +373,19 @@ function renderRecipeForm() {
   const tokFrom = (r.inputs.tokens && r.inputs.tokens.from) || ''
   const P = []
 
-  // Moteur
+  // Moteur : AUCUNE décision à prendre (ratio déduit de l'image, défauts recommandés) —
+  // résumé en une ligne, réglages repliés sous « Avancé ».
+  r.aspect = recipeAspectFromImage()
   P.push('<div class="studio-sub"><p class="studio-sub-title">Moteur</p>')
+  P.push(`<p class="sf-help">Ratio <b>${escapeHtml(r.aspect)}</b> (déduit de votre image, carte 1) · ${escapeHtml(r.model || 'gemini-3-pro-image')} · ${r.candidates ?? 3} versions par essai, ${r.maxAttempts ?? 2} essais max. Rien à régler.</p>`)
+  P.push(`<button type="button" class="i18n-toggle" id="rf-engine-toggle">▾ Réglages du moteur (avancé)</button><div id="rf-engine" class="hidden">`)
   P.push(fieldBlock('Modèle', 'Les ID « -preview » sont morts — utiliser gemini-3-pro-image.',
     `<input type="text" data-recipe="model" value="${escapeHtml(r.model || 'gemini-3-pro-image')}">`))
   P.push(`<div class="studio-row">
-    ${fieldBlock('Ratio', '', `<select data-recipe="aspect">${RECIPE_ASPECTS.map((a) => `<option value="${a}"${(r.aspect || '3:4') === a ? ' selected' : ''}>${a}</option>`).join('')}</select>`)}
-    ${fieldBlock('Candidats (1-4)', '', `<input type="number" data-recipe="candidates" min="1" max="4" value="${r.candidates ?? 3}">`)}
-    ${fieldBlock('Tentatives (1-3)', '', `<input type="number" data-recipe="maxAttempts" min="1" max="3" value="${r.maxAttempts ?? 2}">`)}
-  </div></div>`)
+    ${fieldBlock('Ratio (déduit de l’image)', 'Portrait = 3:4, paysage = 4:3 — décidé par votre design, non modifiable.', `<input type="text" value="${escapeHtml(r.aspect)}" disabled>`)}
+    ${fieldBlock('Versions par essai (1-4)', 'À CHAQUE commande client, l’IA dessine N versions et le juge garde la meilleure. Pas le nombre de personnes !', `<input type="number" data-recipe="candidates" min="1" max="4" value="${r.candidates ?? 3}">`)}
+    ${fieldBlock('Essais max (1-3)', 'Si aucune version ne passe le juge, on refait un essai complet.', `<input type="number" data-recipe="maxAttempts" min="1" max="3" value="${r.maxAttempts ?? 2}">`)}
+  </div></div></div>`)
 
   // Entrées (mapping auto depuis la config)
   P.push('<div class="studio-sub"><p class="studio-sub-title">Entrées (depuis les étapes)</p>')
@@ -389,9 +396,15 @@ function renderRecipeForm() {
   if (tokFrom && !tokKeys.includes(tokFrom)) tokKeys.unshift(tokFrom)
   const tokOpts = ['<option value="">Aucun (pas de prénoms multiples)</option>']
     .concat(tokKeys.map((k) => `<option value="${escapeHtml(k)}"${tokFrom === k ? ' selected' : ''}>${escapeHtml(k)}${configInputSteps().some((s) => s.key === k) ? '' : ' (hors config)'}</option>`))
+  // « Max prénoms » SYNCHRONISÉ sur « Personnes max » du juge photo (une seule source de vérité :
+  // la validation exige de toute façon l'égalité — autant la faire automatiquement).
+  const photoStepCfg = pState.config && (pState.config.steps || []).find((s) => s.type === 'photo')
+  const peopleMaxCfg = photoStepCfg && photoStepCfg.photoPolicy && photoStepCfg.photoPolicy.people && photoStepCfg.photoPolicy.people.max
+  if (typeof peopleMaxCfg === 'number' && r.inputs.tokens) r.inputs.tokens.max = peopleMaxCfg
+  const tokMaxLocked = typeof peopleMaxCfg === 'number'
   P.push(`<div class="studio-row">
     ${fieldBlock('Prénoms depuis (tokens.from)', 'Champ texte découpé en prénoms.', `<select data-recipe-tokens="from">${tokOpts.join('')}</select>`)}
-    ${fieldBlock('Max prénoms (1-8)', 'Doit égaler photoPolicy.people.max.', `<input type="number" data-recipe-tokens="max" min="1" max="8" value="${(r.inputs.tokens && r.inputs.tokens.max) ?? 6}">`)}
+    ${fieldBlock('Max prénoms (1-8)', tokMaxLocked ? '= « Personnes max » du juge photo (synchronisé automatiquement).' : 'Nombre max de prénoms nommables sur le dessin.', `<input type="number" data-recipe-tokens="max" min="1" max="8" value="${(r.inputs.tokens && r.inputs.tokens.max) ?? 6}"${tokMaxLocked ? ' disabled' : ''}>`)}
   </div>`)
   P.push(fieldBlock('Titre (template)', 'Ex : La famille {familyName}. Les {champs} viennent de la config.',
     `<input type="text" data-recipe-title="template" value="${escapeHtml((r.inputs.title && r.inputs.title.template) || '')}">`))
@@ -493,6 +506,13 @@ function wireRecipeEvents() {
     const hidden = adv.classList.toggle('hidden')
     advT.textContent = hidden ? '▾ Fragments avancés' : '▴ Masquer les fragments avancés'
   })
+  // réglages moteur (repliés : défauts recommandés, ratio déduit de l'image)
+  const engT = $('#rf-engine-toggle')
+  if (engT) engT.addEventListener('click', () => {
+    const eng = $('#rf-engine')
+    const hidden = eng.classList.toggle('hidden')
+    engT.textContent = hidden ? '▾ Réglages du moteur (avancé)' : '▴ Masquer les réglages du moteur'
+  })
 }
 // Validation recette côté client (règles simples ; le back re-valide via RecipeService).
 function validateRecipeClient() {
@@ -564,7 +584,10 @@ async function runServerVerify() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
-        studioConfig: { ...pState.config, productType: pState.productType },
+        // même forme qu'à la publication : nom de code seulement s'il est saisi (vide = auto)
+        studioConfig: pState.productType
+          ? { ...pState.config, productType: pState.productType }
+          : (() => { const c = { ...pState.config }; delete c.productType; return c })(),
         studioRecipe: pState.recipe,
       }),
     })
@@ -1139,13 +1162,20 @@ function personalizedPublishGate() {
   if (!pState.config) missing.push('config (choisir un preset)')
   else if (!validatePersonalizedConfig().ok) missing.push('config invalide')
   if (!pState.recipe || validateRecipeClient().length) missing.push('recette')
-  if (!PERSONALIZED_PT_RE.test(pState.productType)) missing.push('slug produit')
+  // nom de code : optionnel (vide = auto) ; seul un slug saisi mais invalide bloque
+  if (pState.productType && !PERSONALIZED_PT_RE.test(pState.productType)) missing.push('nom de code invalide')
   if (!state.collection) missing.push('collection')
   if (!state.results.length) missing.push('≥1 rendu')
   return { ok: missing.length === 0, hint: missing.length ? 'Manque : ' + missing.join(' · ') : 'Prêt à publier' }
 }
 function refreshActionPersonalized() {
   const info = $('#actionInfo'), btn = $('#publishBtn')
+  // le ratio de génération suit l'image : si l'orientation a changé (nouvel upload / retaillage),
+  // on resynchronise la recette et son affichage (sans voler le focus si Walid tape dedans)
+  if (pState.recipe && pState.recipe.aspect !== recipeAspectFromImage()) {
+    pState.recipe.aspect = recipeAspectFromImage()
+    if (!document.activeElement || !document.activeElement.closest('#recipeForm')) renderRecipeForm()
+  }
   if (state.needsResize) { info.textContent = "⚠️ Retaille l'image au bon format pour publier"; btn.disabled = true; return }
   const gate = personalizedPublishGate()
   info.textContent = gate.hint
@@ -1158,8 +1188,16 @@ function buildPersonalizedPublishBlock() {
   // a réellement une étape photo (sinon fichiers Shopify orphelins, sans step examples.* pour les
   // référencer).
   const hasPhoto = !!(pState.config && (pState.config.steps || []).some((s) => s.type === 'photo'))
+  // nom de code : envoyé seulement s'il a été saisi (sinon le back le génère depuis le titre IA)
+  const cfg = pState.config ? { ...pState.config } : null
+  if (cfg) {
+    if (pState.productType) cfg.productType = pState.productType
+    else delete cfg.productType
+  }
+  // ratio de génération : toujours déduit de l'image (aucune décision manuelle)
+  if (pState.recipe) pState.recipe.aspect = recipeAspectFromImage()
   return {
-    studioConfig: pState.config ? { ...pState.config, productType: pState.productType } : null,
+    studioConfig: cfg,
     studioRecipe: pState.recipe,
     reference: {
       sameAsDesign: pState.recipeSameAsDesign,
@@ -1197,8 +1235,8 @@ if (IS_PERSONALIZED) {
     const bad = pState.productType && !PERSONALIZED_PT_RE.test(pState.productType)
     hint.style.color = bad ? 'var(--danger)' : ''
     hint.textContent = bad
-      ? 'Slug invalide : minuscules, chiffres et tirets, commence par une lettre (ex : couple-aquarelle).'
-      : "Unique par produit — minuscules/chiffres/tirets. C'est la clé de routage back-end et de ségrégation des statistiques."
+      ? 'Nom de code invalide : minuscules, chiffres et tirets, commence par une lettre — ou laisse vide (généré automatiquement).'
+      : "Identifiant interne unique (routage back-end + statistiques). Laisse vide : il sera dérivé automatiquement du titre généré par l'IA."
     if (pState.config) { renderStudioValidation() }
     refreshAction()
   })

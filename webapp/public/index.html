@@ -98,9 +98,9 @@
         </select>
       </div>
       <div class="field">
-        <label>Slug technique du produit (productType)</label>
-        <input type="text" id="studioProductType" class="decor-vibe" placeholder="ex : couple-aquarelle" autocomplete="off" autocapitalize="none" spellcheck="false">
-        <p class="card-note" id="studioProductTypeHint">Unique par produit — minuscules/chiffres/tirets. C'est la clé de routage back-end et de ségrégation des statistiques.</p>
+        <label>Nom de code du produit (optionnel)</label>
+        <input type="text" id="studioProductType" class="decor-vibe" placeholder="vide = généré automatiquement à la publication" autocomplete="off" autocapitalize="none" spellcheck="false">
+        <p class="card-note" id="studioProductTypeHint">Identifiant interne unique (routage back-end + statistiques). Laisse vide : il sera dérivé automatiquement du titre généré par l'IA.</p>
       </div>
       <div id="studioSteps" class="studio-steps"></div>
       <p id="studioEmpty" class="empty">Choisissez un preset : les étapes du parcours client se chargeront ici.</p>
