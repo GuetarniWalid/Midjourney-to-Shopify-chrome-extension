@@ -20,8 +20,6 @@ const STEP_NAME_RE = /^[a-z][a-zA-Z0-9_]*$/
 const PERSONALIZED_DEFAULT_COLLECTION_GID = '624856400219'
 // Langues du studio (l'ordre compte : FR d'abord)
 const STUDIO_LANGS = ['fr', 'en', 'de', 'nl', 'es']
-const STUDIO_OTHER_LANGS = ['en', 'de', 'nl', 'es']
-const LANG_LABELS = { fr: 'Français', en: 'English', de: 'Deutsch', nl: 'Nederlands', es: 'Español' }
 // Noms réservés aux panneaux foot (le validateur les bloque si type ≠ attendu)
 const STUDIO_RESERVED_PANELS = { photo: 'photo', team: 'choice', name: 'group', format: 'format' }
 // Types proposés à l'ajout (UNIQUEMENT ce que le moteur rend — cf. plan §4.2)
@@ -47,8 +45,6 @@ const PHOTO_GRADES = [
   { key: 'reject', icon: '🔴', fr: 'Refusé' },
 ]
 
-// Maps i18n modifiées après traduction (identité d'objet) -> à retraduire avant publication.
-const staleI18n = new WeakSet()
 
 /* ---------- Catalogue d'étapes PRÊTES À L'EMPLOI ----------
    Jamais de type générique : chaque entrée est une étape CONCRÈTE, entièrement préremplie et
@@ -148,7 +144,6 @@ const pState = {
   photoExamples: { good: null, bad: null }, // base64 en attente (URL CDN posée au publish P4)
   recipeSameAsDesign: true, // le design (carte 1) sert d'image de référence de style
   styleRef: null, // base64 de la référence de style si ≠ design (URL CDN posée au publish P4)
-  previewLang: 'fr',
   previewStepName: null,
   editing: null, // { index, working } pendant l'édition d'une étape
 }
@@ -166,8 +161,6 @@ const RECIPE_ADVANCED = [
 
 /* ---------- Helpers i18n ---------- */
 const t = (map, lang) => (map && typeof map === 'object' ? map[lang] || map.fr || '' : typeof map === 'string' ? map : '')
-const isI18nComplete = (map) =>
-  !!map && typeof map === 'object' && STUDIO_LANGS.every((l) => typeof map[l] === 'string' && map[l].trim())
 // Assure un chemin `a.b.c` dans un objet et renvoie la map i18n (créée = { fr:'' } si absente).
 function ensureI18nMap(root, dotPath) {
   const parts = dotPath.split('.')
@@ -296,7 +289,6 @@ async function loadConfigPreset(id) {
     pState.previewStepName = pState.config.steps[0] && pState.config.steps[0].name
     onConfigChanged()
     $('#studioAddStep').classList.remove('hidden')
-    $('#studioTranslateWrap').classList.remove('hidden')
     $('#studioPreviewWrap').classList.remove('hidden')
   } catch (e) {
     pState.configPresetId = null
@@ -339,17 +331,13 @@ function validatePersonalizedConfig() {
     else rootErrors.push(msg)
   }
 
-  // 2) règle builder : 5 langues sur toute map i18n présente
+  // 2) règle builder : le FRANÇAIS suffit ici — les 4 autres langues sont générées
+  // automatiquement par le backend à la publication (une seule vérité : le FR de Walid).
   for (const step of cfg.steps || []) {
     for (const { path, map } of existingI18nMaps(step)) {
-      const missing = STUDIO_LANGS.filter((l) => !(typeof map[l] === 'string' && map[l].trim()))
-      if (missing.length)
+      if (!(typeof map.fr === 'string' && map.fr.trim()))
         (byStep.get(step.name) || byStep.set(step.name, []).get(step.name)).push(
-          `${path} : langue(s) manquante(s) — ${missing.join(', ')} (les 5 langues sont obligatoires).`
-        )
-      else if (staleI18n.has(map))
-        (byStep.get(step.name) || byStep.set(step.name, []).get(step.name)).push(
-          `${path} : traduction obsolète après modification du français — retraduire.`
+          `${path} : le texte français est vide.`
         )
     }
   }
@@ -695,27 +683,16 @@ function closeStepEditor() {
 function fieldBlock(label, help, controlHtml) {
   return `<div class="studio-field"><label>${escapeHtml(label)}</label>${controlHtml}${help ? `<p class="sf-help">${escapeHtml(help)}</p>` : ''}</div>`
 }
-// Bloc champ i18n : FR visible + repli des 4 autres langues + badge d'état.
+// Bloc champ de texte : FRANÇAIS UNIQUEMENT — les 4 autres langues sont générées
+// automatiquement par le backend à la publication (rien à voir, rien à faire ici).
 function i18nBlock(field, map) {
-  const complete = isI18nComplete(map)
-  const stale = staleI18n.has(map)
-  const badge = complete && !stale
-    ? '<span class="i18n-badge ok">5 langues ✓</span>'
-    : stale
-      ? '<span class="i18n-badge warn">FR modifié — retraduire</span>'
-      : '<span class="i18n-badge warn">FR seul</span>'
-  const ctrl = (lang) =>
+  const ctrl =
     field.kind === 'multiline'
-      ? `<textarea data-i18n="${escapeHtml(field.path)}" data-lang="${lang}">${escapeHtml(map[lang] || '')}</textarea>`
-      : `<input type="text" data-i18n="${escapeHtml(field.path)}" data-lang="${lang}" value="${escapeHtml(map[lang] || '')}">`
-  const others = STUDIO_OTHER_LANGS.map(
-    (l) => `<div class="i18n-lang"><label>${LANG_LABELS[l]}</label>${ctrl(l)}</div>`
-  ).join('')
+      ? `<textarea data-i18n="${escapeHtml(field.path)}" data-lang="fr">${escapeHtml(map.fr || '')}</textarea>`
+      : `<input type="text" data-i18n="${escapeHtml(field.path)}" data-lang="fr" value="${escapeHtml(map.fr || '')}">`
   return `<div class="i18n-field" data-i18n-field="${escapeHtml(field.path)}">
-    <div class="i18n-head"><label>${escapeHtml(field.label)}</label>${badge}</div>
-    ${ctrl('fr')}
-    <button type="button" class="i18n-toggle" data-i18n-toggle>▾ Voir les 4 autres langues</button>
-    <div class="i18n-others hidden">${others}</div>
+    <div class="i18n-head"><label>${escapeHtml(field.label)}</label></div>
+    ${ctrl}
   </div>`
 }
 function renderStepEditorBody() {
@@ -775,7 +752,7 @@ function renderStepEditorBody() {
   }
 
   // champs i18n
-  parts.push('<div class="studio-sub"><p class="studio-sub-title">Libellés (5 langues)</p>')
+  parts.push('<div class="studio-sub"><p class="studio-sub-title">Textes (en français — traduits automatiquement à la publication)</p>')
   for (const f of i18nFieldsOf(s)) {
     // cartProperty.label n'existe que si la case est cochée
     if (f.path === 'cartProperty.label' && !s.cartProperty) continue
@@ -824,35 +801,19 @@ function renderPhotoExamplesEditor(s) {
       <input type="file" accept="image/*" id="sf-ex-${kind}" class="decor-vibe">
     </div>`
   return `<div class="studio-sub"><p class="studio-sub-title">Exemples photo</p>
-    <p class="sf-help">Images envoyées dans Shopify Files à la publication. Les Alt/légendes (i18n) sont plus bas.</p>
+    <p class="sf-help">Images envoyées dans Shopify Files à la publication. Leurs textes sont plus bas.</p>
     <div class="photo-ex">${slot('good', goodSrc, 'Bonne photo')}${slot('bad', badSrc, 'Photo à éviter')}</div>
   </div>`
 }
 // Câble les events du corps de l'éditeur (une fois rendu).
 function wireStepEditorEvents() {
   const s = pState.editing.working
-  // repli des langues
-  $$('#studioStepBody [data-i18n-toggle]').forEach((btn) =>
-    btn.addEventListener('click', () => {
-      const others = btn.parentElement.querySelector('.i18n-others')
-      const hidden = others.classList.toggle('hidden')
-      btn.textContent = hidden ? '▾ Voir les 4 autres langues' : '▴ Masquer les autres langues'
-    })
-  )
-  // saisie i18n -> mutation de la map ; FR modifié = map stale (retraduire)
+  // saisie des textes : FRANÇAIS uniquement — les autres langues sont régénérées par le
+  // backend à la publication (une seule vérité : le FR de Walid).
   $$('#studioStepBody [data-i18n]').forEach((inp) =>
     inp.addEventListener('input', () => {
       const map = ensureI18nMap(s, inp.dataset.i18n)
-      const lang = inp.dataset.lang
-      map[lang] = inp.value
-      if (lang === 'fr') { if (!isI18nComplete(map)) {} else staleI18n.add(map) }
-      else staleI18n.delete(map) // correction manuelle d'une autre langue -> plus obsolète
-      // rafraîchit le badge de CE champ
-      const field = inp.closest('.i18n-field')
-      const badge = field.querySelector('.i18n-badge')
-      const complete = isI18nComplete(map), stale = staleI18n.has(map)
-      badge.className = 'i18n-badge ' + (complete && !stale ? 'ok' : 'warn')
-      badge.textContent = complete && !stale ? '5 langues ✓' : stale ? 'FR modifié — retraduire' : 'FR seul'
+      map.fr = inp.value
     })
   )
   // nom : validation live (regex + réservé + unicité)
@@ -1114,65 +1075,14 @@ function teardownStepDrag() {
   document.removeEventListener('pointercancel', cancelStepDrag)
 }
 
-/* ---------- Traduction FR -> 4 langues (endpoint back, P3) ---------- */
-async function translateAll() {
-  if (!pState.config) return
-  // maps à traduire : incomplètes OU obsolètes, avec un FR non vide
-  const targets = []
-  for (const step of pState.config.steps) {
-    for (const { map } of existingI18nMaps(step)) {
-      const frOk = typeof map.fr === 'string' && map.fr.trim()
-      if (frOk && (!isI18nComplete(map) || staleI18n.has(map))) targets.push(map)
-    }
-  }
-  if (!targets.length) return toast('Rien à traduire — tout est déjà à jour.', 'ok')
-  const btn = $('#studioTranslateAll')
-  const hint = $('#studioTranslateHint')
-  btn.disabled = true
-  hint.textContent = `Traduction de ${targets.length} libellé(s)…`
-  try {
-    const items = targets.map((map, i) => ({ id: String(i), fr: map.fr }))
-    const r = await fetch(API + '/api/shopify-product-publisher/translate-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ items }),
-    })
-    const data = await safeJson(r)
-    if (!r.ok || !data.success || !Array.isArray(data.items)) {
-      throw new Error(r.status === 401 ? 'session expirée — reconnecte-toi' : data.message || data.error || 'échec (' + r.status + ')')
-    }
-    for (const it of data.items) {
-      const map = targets[parseInt(it.id, 10)]
-      if (!map) continue
-      for (const l of STUDIO_OTHER_LANGS) if (typeof it[l] === 'string') map[l] = it[l]
-      staleI18n.delete(map)
-    }
-    hint.textContent = ''
-    toast('Traduction terminée ✓', 'ok')
-    // si l'éditeur est ouvert, rafraîchit ses badges/inputs
-    if (pState.editing) renderStepEditorBody()
-    onConfigChanged()
-  } catch (e) {
-    hint.textContent = ''
-    toast('Traduction : ' + e.message, 'err')
-  } finally {
-    btn.disabled = false
-  }
-}
-
-/* ---------- Aperçu du parcours client ---------- */
+/* ---------- Aperçu du parcours client ----------
+   (FR uniquement — les 4 autres langues sont générées par le backend à la publication,
+   depuis le même texte : rien d'autre à contrôler ici.) */
 function renderStudioPreview() {
   const wrap = $('#studioPreviewWrap')
   if (!pState.config) { wrap.classList.add('hidden'); return }
   wrap.classList.remove('hidden')
-  const lang = pState.previewLang
-  // onglets langues
-  $('#studioPreviewLangs').innerHTML = STUDIO_LANGS.map(
-    (l) => `<button class="${l === lang ? 'on' : ''}" data-lang="${l}">${l}</button>`
-  ).join('')
-  $$('#studioPreviewLangs button').forEach((b) =>
-    b.addEventListener('click', () => { pState.previewLang = b.dataset.lang; renderStudioPreview() })
-  )
+  const lang = 'fr'
   // stepper
   const steps = pState.config.steps
   if (!steps.some((s) => s.name === pState.previewStepName)) pState.previewStepName = steps[0] && steps[0].name
@@ -1300,7 +1210,6 @@ if (IS_PERSONALIZED) {
   // des étapes, ex. supprimer la photo pour un produit 100 % texte).
   loadConfigPreset('famille-lineart')
   $('#studioAddStep').addEventListener('click', openTypePicker)
-  $('#studioTranslateAll').addEventListener('click', translateAll)
   $('#recipeVerify').addEventListener('click', runServerVerify)
   $('#studioStepSave').addEventListener('click', saveStepEditor)
   $('#studioStepCancel').addEventListener('click', closeStepEditor)
