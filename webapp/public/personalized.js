@@ -50,6 +50,95 @@ const PHOTO_GRADES = [
 // Maps i18n modifiées après traduction (identité d'objet) -> à retraduire avant publication.
 const staleI18n = new WeakSet()
 
+/* ---------- Catalogue d'étapes PRÊTES À L'EMPLOI ----------
+   Jamais de type générique : chaque entrée est une étape CONCRÈTE, entièrement préremplie et
+   déjà traduite en 5 langues — l'ajout ne demande AUCUNE saisie (modifiable ensuite via ✎). */
+const STEP_CATALOG = [
+  {
+    id: 'photo', icon: '📷', label: 'Photo du client',
+    desc: 'Le client envoie sa photo (une seule étape photo possible)',
+    step: {
+      name: 'photo', type: 'photo', required: true, consent: { required: true }, payloadKey: 'photo',
+      title: { fr: 'Votre photo', en: 'Your photo', de: 'Dein Foto', nl: 'Je foto', es: 'Tu foto' },
+      checkpointLabel: { fr: 'Photo', en: 'Photo', de: 'Foto', nl: 'Foto', es: 'Foto' },
+      faceAngle: 'front', photoCheck: false,
+    },
+  },
+  {
+    id: 'familyName', icon: '✏️', label: 'Nom de famille',
+    desc: 'Champ texte — ex. « Guetarni »',
+    step: {
+      name: 'familyName', type: 'text', required: true, maxLength: 24, charset: 'free', payloadKey: 'familyName',
+      cartProperty: { label: { fr: 'Nom de famille', en: 'Family name', de: 'Familienname', nl: 'Familienaam', es: 'Apellido' } },
+      title: { fr: 'Votre nom de famille', en: 'Your family name', de: 'Dein Familienname', nl: 'Je familienaam', es: 'Tu apellido' },
+      label: { fr: 'Nom affiché sous le dessin', en: 'Name shown under the artwork', de: 'Name unter der Zeichnung', nl: 'Naam onder de tekening', es: 'Nombre mostrado bajo el dibujo' },
+      placeholder: { fr: 'Ex : Guetarni', en: 'E.g. Guetarni', de: 'z. B. Guetarni', nl: 'Bijv. Guetarni', es: 'Ej.: Guetarni' },
+      checkpointLabel: { fr: 'Nom', en: 'Name', de: 'Name', nl: 'Naam', es: 'Apellido' },
+    },
+  },
+  {
+    id: 'firstName', icon: '✏️', label: 'Prénom (un seul)',
+    desc: 'Champ texte — ex. « Lina »',
+    step: {
+      name: 'firstName', type: 'text', required: true, maxLength: 20, charset: 'letters', transform: 'uppercase', payloadKey: 'firstName',
+      cartProperty: { label: { fr: 'Prénom', en: 'First name', de: 'Vorname', nl: 'Voornaam', es: 'Nombre' } },
+      title: { fr: 'Votre prénom', en: 'Your first name', de: 'Dein Vorname', nl: 'Je voornaam', es: 'Tu nombre' },
+      checkpointLabel: { fr: 'Prénom', en: 'Name', de: 'Name', nl: 'Naam', es: 'Nombre' },
+      label: { fr: 'Prénom à afficher', en: 'Name to display', de: 'Anzuzeigender Name', nl: 'Weer te geven naam', es: 'Nombre a mostrar' },
+      placeholder: { fr: 'Ex : Lina', en: 'E.g. Lina', de: 'z. B. Lina', nl: 'Bijv. Lina', es: 'Ej.: Lina' },
+    },
+  },
+  {
+    id: 'memberNames', icon: '✏️', label: 'Prénoms (liste, dans l’ordre)',
+    desc: 'Plusieurs prénoms séparés par des virgules — pour nommer chaque personne',
+    step: {
+      name: 'memberNames', type: 'text', required: true, maxLength: 140, charset: 'free', payloadKey: 'names',
+      cartProperty: { label: { fr: 'Prénoms', en: 'First names', de: 'Vornamen', nl: 'Voornamen', es: 'Nombres' } },
+      title: { fr: "Les prénoms, dans l'ordre", en: 'The names, in order', de: 'Die Vornamen, in der Reihenfolge', nl: 'De voornamen, op volgorde', es: 'Los nombres, en orden' },
+      label: { fr: 'Prénoms de gauche à droite, séparés par des virgules', en: 'Names left to right, separated by commas', de: 'Vornamen von links nach rechts, durch Kommas getrennt', nl: "Voornamen van links naar rechts, gescheiden door komma's", es: 'Nombres de izquierda a derecha, separados por comas' },
+      placeholder: { fr: 'Ex : Papa, Franco, Maman, Veronica', en: 'E.g. Daddy, Franco, Mommy, Veronica', de: 'z. B. Papa, Franco, Mama, Veronica', nl: 'Bijv. Papa, Franco, Mama, Veronica', es: 'Ej.: Papá, Franco, Mamá, Veronica' },
+      help: { fr: 'Dans le même ordre que sur votre photo (de gauche à droite).', en: 'Same order as on your photo (left to right).', de: 'In derselben Reihenfolge wie auf deinem Foto (von links nach rechts).', nl: 'In dezelfde volgorde als op je foto (van links naar rechts).', es: 'En el mismo orden que en tu foto (de izquierda a derecha).' },
+      checkpointLabel: { fr: 'Prénoms', en: 'Names', de: 'Namen', nl: 'Namen', es: 'Nombres' },
+    },
+  },
+  {
+    id: 'birthDate', icon: '📅', label: 'Date de naissance',
+    desc: 'Sélecteur de date — écrite sur le poster',
+    step: {
+      name: 'birthDate', type: 'date', mode: 'date', required: true, payloadKey: 'birthDate',
+      cartProperty: { label: { fr: 'Date de naissance', en: 'Date of birth', de: 'Geburtsdatum', nl: 'Geboortedatum', es: 'Fecha de nacimiento' } },
+      title: { fr: 'La date de naissance', en: 'The date of birth', de: 'Das Geburtsdatum', nl: 'De geboortedatum', es: 'La fecha de nacimiento' },
+      checkpointLabel: { fr: 'Naissance', en: 'Birth', de: 'Geburt', nl: 'Geboorte', es: 'Nacimiento' },
+      label: { fr: 'Date affichée sur le poster', en: 'Date shown on the poster', de: 'Datum auf dem Poster', nl: 'Datum op de poster', es: 'Fecha mostrada en el póster' },
+      help: { fr: "La date de naissance à écrire sur l'affiche.", en: 'The date of birth to write on the print.', de: 'Das Geburtsdatum, das auf das Poster geschrieben wird.', nl: 'De geboortedatum die op de poster komt.', es: 'La fecha de nacimiento que se escribirá en el póster.' },
+    },
+  },
+  {
+    id: 'weddingDate', icon: '📅', label: 'Date de mariage',
+    desc: 'Sélecteur de date — écrite sur le poster',
+    step: {
+      name: 'weddingDate', type: 'date', mode: 'date', required: true, payloadKey: 'weddingDate',
+      cartProperty: { label: { fr: 'Date du mariage', en: 'Wedding date', de: 'Hochzeitsdatum', nl: 'Trouwdatum', es: 'Fecha de la boda' } },
+      title: { fr: 'La date du mariage', en: 'The wedding date', de: 'Das Hochzeitsdatum', nl: 'De trouwdatum', es: 'La fecha de la boda' },
+      checkpointLabel: { fr: 'Mariage', en: 'Wedding', de: 'Hochzeit', nl: 'Bruiloft', es: 'Boda' },
+      label: { fr: 'Date affichée sur le poster', en: 'Date shown on the poster', de: 'Datum auf dem Poster', nl: 'Datum op de poster', es: 'Fecha mostrada en el póster' },
+      help: { fr: "La date du mariage à écrire sur l'affiche.", en: 'The wedding date to write on the print.', de: 'Das Hochzeitsdatum, das auf das Poster geschrieben wird.', nl: 'De trouwdatum die op de poster komt.', es: 'La fecha de la boda que se escribirá en el póster.' },
+    },
+  },
+  {
+    id: 'personalMessage', icon: '✏️', label: 'Message personnel',
+    desc: 'Petit texte libre — ex. une dédicace sous le dessin',
+    step: {
+      name: 'personalMessage', type: 'text', required: true, maxLength: 90, charset: 'free', payloadKey: 'personalMessage',
+      cartProperty: { label: { fr: 'Message', en: 'Message', de: 'Botschaft', nl: 'Boodschap', es: 'Mensaje' } },
+      title: { fr: 'Votre message personnel', en: 'Your personal message', de: 'Deine persönliche Botschaft', nl: 'Je persoonlijke boodschap', es: 'Tu mensaje personal' },
+      checkpointLabel: { fr: 'Message', en: 'Message', de: 'Botschaft', nl: 'Boodschap', es: 'Mensaje' },
+      label: { fr: 'Message affiché sur le poster', en: 'Message shown on the poster', de: 'Botschaft auf dem Poster', nl: 'Boodschap op de poster', es: 'Mensaje mostrado en el póster' },
+      placeholder: { fr: 'Ex : Pour toujours et à jamais', en: 'E.g. Forever and always', de: 'z. B. Für immer und ewig', nl: 'Bijv. Voor altijd en eeuwig', es: 'Ej.: Por siempre jamás' },
+    },
+  },
+]
+
 // État du builder. config/recipe = COPIES profondes des presets (jamais muter un preset en cache).
 const pState = {
   configPresetId: null,
@@ -287,9 +376,12 @@ function renderStudioSteps() {
   const v = validatePersonalizedConfig()
   const photoCount = steps.filter((s) => s.type === 'photo').length
   steps.forEach((step, i) => {
+    // L'étape « format » n'est PAS montrée : rien à y décider (tailles/cadres = variantes créées
+    // par le back à la publication, libellés standards identiques pour tous). Elle reste dans le
+    // JSON — le contrat du thème l'exige — et le client la verra (cf. aperçu du parcours).
+    if (step.type === 'format') return
     const errs = v.byStep.get(step.name) || []
     const meta = STEP_TYPE_META[step.type] || { icon: '·' }
-    const isFormat = step.type === 'format'
     const cell = document.createElement('div')
     cell.className = 'studio-step'
     cell.dataset.name = step.name
@@ -300,13 +392,13 @@ function renderStudioSteps() {
       `<span class="ss-badge ${errs.length ? 'err' : 'ok'}">${errs.length ? '✗ ' + errs.length : '✓'}</span>` +
       `<span class="ss-actions">` +
       `<button class="ss-act ss-edit" title="Modifier">✎</button>` +
-      `<button class="ss-act ss-dup" title="Dupliquer"${isFormat || step.type === 'photo' ? ' disabled' : ''}>⧉</button>` +
-      `<button class="ss-act danger ss-del" title="Supprimer"${isFormat ? ' disabled' : ''}>🗑</button>` +
+      `<button class="ss-act ss-dup" title="Dupliquer"${step.type === 'photo' ? ' disabled' : ''}>⧉</button>` +
+      `<button class="ss-act danger ss-del" title="Supprimer">🗑</button>` +
       `</span>`
     cell.querySelector('.ss-edit').addEventListener('click', (e) => { e.stopPropagation(); openStepEditor(i) })
     cell.querySelector('.ss-dup').addEventListener('click', (e) => { e.stopPropagation(); duplicateStep(i) })
     cell.querySelector('.ss-del').addEventListener('click', (e) => { e.stopPropagation(); deleteStep(i) })
-    if (!isFormat) attachStepDrag(cell)
+    attachStepDrag(cell)
     wrap.appendChild(cell)
   })
   // photo max 1 : grise le choix photo dans l'ajout (géré à l'ouverture du picker)
@@ -333,7 +425,9 @@ function renderStudioValidation() {
       (items.length > 12 ? `<div>… et ${items.length - 12} autre(s).</div>` : '')
   }
   const badge = $('#studioBadge')
-  badge.textContent = v.ok ? `${pState.config.steps.length} étapes · valide ✓` : `${stepErrs + v.rootErrors.length} erreur(s)`
+  // compte AFFICHÉ = étapes visibles (l'étape format, gérée en coulisses, n'est pas comptée)
+  const visibleCount = pState.config.steps.filter((s) => s.type !== 'format').length
+  badge.textContent = v.ok ? `${visibleCount} étapes · valide ✓` : `${stepErrs + v.rootErrors.length} erreur(s)`
 }
 
 /* ---------- Éditeur de recette (studio.recipe) ---------- */
@@ -869,18 +963,24 @@ function saveStepEditor() {
 }
 
 /* ---------- Ajout / duplication / suppression d'étapes ---------- */
+// Sélecteur d'étapes CONCRÈTES (catalogue) : tout est prérempli et déjà traduit — l'ajout ne
+// demande aucune saisie. Jamais de type générique.
 function openTypePicker() {
   const list = $('#studioTypeList')
   const photoFull = $('#studioAddStep').dataset.photoFull === '1'
-  const choices = ['photo', 'text', 'number', 'date'] // choice/group masqués (non rendus)
-  list.innerHTML = choices.map((ty) => {
-    const m = STEP_TYPE_META[ty]
-    const dis = ty === 'photo' && photoFull
-    return `<button class="section-opt" data-type="${ty}" ${dis ? 'disabled' : ''}>
-      <span>${m.icon} ${m.label}${dis ? ' — déjà présent' : ''}<span class="st-desc"> ${escapeHtml(m.desc)}</span></span></button>`
-  }).join('')
+  list.innerHTML =
+    '<p class="card-note">Tout est prérempli et déjà traduit en 5 langues — modifiable ensuite via ✎.</p>' +
+    STEP_CATALOG.map((entry, i) => {
+      const dis = entry.step.type === 'photo' && photoFull
+      return `<button class="section-opt" data-catalog="${i}" ${dis ? 'disabled' : ''}>
+      <span>${entry.icon} ${escapeHtml(entry.label)}${dis ? ' — déjà présente' : ''}<span class="st-desc"> ${escapeHtml(entry.desc)}</span></span></button>`
+    }).join('')
   list.querySelectorAll('.section-opt').forEach((b) =>
-    b.addEventListener('click', () => { if (!b.disabled) { addStep(b.dataset.type); $('#studioTypeOverlay').classList.add('hidden') } })
+    b.addEventListener('click', () => {
+      if (b.disabled) return
+      addCatalogStep(STEP_CATALOG[parseInt(b.dataset.catalog, 10)])
+      $('#studioTypeOverlay').classList.add('hidden')
+    })
   )
   $('#studioTypeOverlay').classList.remove('hidden')
 }
@@ -890,18 +990,19 @@ function uniqueStepName(base) {
   while (taken.has(name)) name = base + i++
   return name
 }
-function addStep(type) {
+function addCatalogStep(entry) {
   const steps = pState.config.steps
-  const name = type === 'photo' ? 'photo' : uniqueStepName(type === 'text' ? 'champ' : type)
-  const step = { name, type, required: true, payloadKey: name, title: { fr: '' }, checkpointLabel: { fr: '' } }
-  if (type === 'text') { step.maxLength = 40; step.charset = 'free' }
-  if (type === 'date') step.mode = 'date'
-  if (type === 'photo') { step.consent = { required: true }; step.photoCheck = false }
+  const step = JSON.parse(JSON.stringify(entry.step))
+  // nom déjà pris (ex. 2 dates) -> suffixe, payloadKey aligné
+  if (steps.some((s) => s.name === step.name)) {
+    step.name = uniqueStepName(step.name)
+    step.payloadKey = step.name
+  }
   // insertion AVANT l'étape format (qui reste toujours en dernier)
   const fmtIdx = steps.findIndex((s) => s.type === 'format')
   if (fmtIdx >= 0) steps.splice(fmtIdx, 0, step); else steps.push(step)
   onConfigChanged()
-  openStepEditor(steps.indexOf(step))
+  toast(`« ${entry.label} » ajoutée ✓ — déjà traduite, rien à remplir`, 'ok')
 }
 function duplicateStep(index) {
   const src = pState.config.steps[index]
