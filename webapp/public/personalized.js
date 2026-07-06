@@ -214,7 +214,8 @@ async function loadConfigPreset(id) {
     pState.config = null
     onConfigChanged()
     badge.textContent = 'erreur'
-    toast('Preset : ' + e.message, 'err')
+    $('#studioEmpty').textContent = 'Impossible de charger le parcours client — recharge la page.'
+    toast('Parcours : ' + e.message, 'err')
   }
 }
 async function loadRecipePreset() {
@@ -1194,7 +1195,10 @@ if (IS_PERSONALIZED) {
   // garde-fou anti-scroll pour le glisser des étapes (comme #resultsGrid dans app.js)
   const stepsGrid = $('#studioSteps')
   if (stepsGrid) stepsGrid.addEventListener('touchmove', (e) => { if (pdrag && pdrag.armed) e.preventDefault() }, { passive: false })
-  $('#studioPreset').addEventListener('change', (e) => { if (e.target.value) loadConfigPreset(e.target.value) })
+  // Aucune décision d'entrée : le parcours FAMILLE se charge automatiquement comme base
+  // (les étapes s'éditent librement — les autres parcours s'obtiennent en retirant/ajoutant
+  // des étapes, ex. supprimer la photo pour un produit 100 % texte).
+  loadConfigPreset('famille-lineart')
   $('#studioAddStep').addEventListener('click', openTypePicker)
   $('#studioTranslateAll').addEventListener('click', translateAll)
   $('#recipeVerify').addEventListener('click', runServerVerify)

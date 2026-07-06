@@ -88,19 +88,12 @@
         <h2 class="card-title">3 · Personnalisation (studio)</h2>
         <span id="studioBadge" class="hint">—</span>
       </div>
-      <div class="field">
-        <label>Partir de :</label>
-        <select id="studioPreset" class="decor-vibe">
-          <option value="">Choisir un preset…</option>
-          <option value="famille-lineart">Famille dessin au trait — photo → nom → prénoms → format</option>
-          <option value="champs-texte">Champs texte — texte → format (sans photo)</option>
-          <option value="photo-simple">Photo simple — photo → format</option>
-        </select>
-      </div>
-      <!-- Le nom de code (productType) n'est PLUS saisi ici : généré automatiquement à la
+      <!-- Aucune décision d'entrée : le parcours FAMILLE (photo → nom → prénoms → format) se charge
+           automatiquement comme base — les étapes s'éditent/ajoutent/suppriment librement dessous.
+           Le nom de code (productType) n'est PLUS saisi ici non plus : généré automatiquement à la
            publication (dérivé du titre IA, unicité garantie côté back). -->
       <div id="studioSteps" class="studio-steps"></div>
-      <p id="studioEmpty" class="empty">Choisissez un preset : les étapes du parcours client se chargeront ici.</p>
+      <p id="studioEmpty" class="empty">Chargement du parcours client…</p>
       <button id="studioAddStep" class="ghost-btn hidden">＋ Ajouter une étape</button>
       <div id="studioTranslateWrap" class="studio-translate-wrap hidden">
         <button id="studioTranslateAll" class="ghost-btn">🌍 Traduire tout (EN/DE/NL/ES)</button>
