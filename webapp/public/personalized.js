@@ -393,17 +393,19 @@ function renderStudioSteps() {
   $('#studioAddStep').dataset.photoFull = photoCount >= 1 ? '1' : ''
 }
 
-/* ---------- Rendu : résumé de validation ---------- */
+/* ---------- Rendu : erreurs de validation ----------
+   Règle UX : quand tout est valide, on n'affiche RIEN (pas de bandeau vert, pas de badge) —
+   seules les ERREURS apparaissent, car elles seules demandent une action. */
 function renderStudioValidation() {
   const box = $('#studioValidation')
-  if (!pState.config) { box.classList.add('hidden'); return }
+  const badge = $('#studioBadge')
+  if (!pState.config) { box.className = 'studio-validation hidden'; badge.textContent = ''; return }
   const v = validatePersonalizedConfig()
-  box.classList.remove('hidden')
   const stepErrs = [...v.byStep.values()].reduce((n, a) => n + a.length, 0)
   if (v.ok) {
-    box.className = 'studio-validation ok'
-    box.innerHTML = `✓ Configuration valide — les 5 langues sont présentes.` +
-      (v.warnings.length ? `<div class="sv-warn">${v.warnings.length} avertissement(s) non bloquant(s).</div>` : '')
+    box.className = 'studio-validation hidden'
+    box.innerHTML = ''
+    badge.textContent = ''
   } else {
     box.className = 'studio-validation err'
     const items = [...v.rootErrors]
@@ -411,11 +413,8 @@ function renderStudioValidation() {
     box.innerHTML = `✗ ${v.rootErrors.length + stepErrs} erreur(s) à corriger avant publication :` +
       `<ul>${items.slice(0, 12).map((e) => `<li>${escapeHtml(e)}</li>`).join('')}</ul>` +
       (items.length > 12 ? `<div>… et ${items.length - 12} autre(s).</div>` : '')
+    badge.textContent = `${stepErrs + v.rootErrors.length} erreur(s)`
   }
-  const badge = $('#studioBadge')
-  // compte AFFICHÉ = étapes visibles (l'étape format, gérée en coulisses, n'est pas comptée)
-  const visibleCount = pState.config.steps.filter((s) => s.type !== 'format').length
-  badge.textContent = v.ok ? `${visibleCount} étapes · valide ✓` : `${stepErrs + v.rootErrors.length} erreur(s)`
 }
 
 /* ---------- Éditeur de recette (studio.recipe) ---------- */
@@ -615,16 +614,16 @@ function validateRecipeClient() {
   if (!pState.recipeSameAsDesign && !pState.styleRef) errs.push('Image de référence obligatoire (ou coche « le design est la référence »).')
   return errs
 }
+// Même règle UX que la config : valide = RIEN d'affiché ; seules les erreurs apparaissent.
 function renderRecipeValidation() {
   const box = $('#recipeValidation')
   const badge = $('#recipeBadge')
-  if (!pState.recipe) { box.classList.add('hidden'); return }
+  if (!pState.recipe) { box.className = 'studio-validation hidden'; badge.textContent = ''; return }
   const errs = validateRecipeClient()
-  box.classList.remove('hidden')
   if (!errs.length) {
-    box.className = 'studio-validation ok'
-    box.innerHTML = '✓ Recette valide.'
-    badge.textContent = 'recette valide ✓'
+    box.className = 'studio-validation hidden'
+    box.innerHTML = ''
+    badge.textContent = ''
   } else {
     box.className = 'studio-validation err'
     box.innerHTML = `✗ ${errs.length} problème(s) :<ul>${errs.map((e) => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`
@@ -1083,8 +1082,8 @@ function renderStudioPreview() {
   if (!pState.config) { wrap.classList.add('hidden'); return }
   wrap.classList.remove('hidden')
   const lang = 'fr'
-  // stepper
-  const steps = pState.config.steps
+  // stepper — SANS l'étape format : gérée automatiquement (variantes), rien à contrôler ici
+  const steps = pState.config.steps.filter((s) => s.type !== 'format')
   if (!steps.some((s) => s.name === pState.previewStepName)) pState.previewStepName = steps[0] && steps[0].name
   $('#studioPreviewStepper').innerHTML = steps.map((s, i) =>
     `<button class="${s.name === pState.previewStepName ? 'on' : ''}" data-name="${escapeHtml(s.name)}">` +
@@ -1107,8 +1106,6 @@ function renderStudioPreview() {
       if (bad) parts.push(`<div class="sp-ex bad"><img src="${bad}" alt=""><span>⛔ ${escapeHtml(t(getI18nMap(step, 'examples.bad.caption'), lang))}</span></div>`)
       parts.push('</div>')
     }
-  } else if (step.type === 'format') {
-    parts.push(`<div class="sp-field"><label>${escapeHtml(t(step.title, lang))}</label><div class="sp-fake">Taille (30x40 / 60x80) · Cadre</div></div>`)
   } else {
     const label = t(step.label, lang) || t(step.title, lang)
     const ph = t(step.placeholder, lang)
