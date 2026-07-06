@@ -14,14 +14,10 @@ const PERSONALIZED_ASSET_BASE = (() => {
   return path.slice(0, path.lastIndexOf('/') + 1)
 })()
 
-// Nom d'étape (contrat moteur)
-const STEP_NAME_RE = /^[a-z][a-zA-Z0-9_]*$/
 // Collection parente pré-suggérée : « Poster Personnalisé Famille » (modifiable)
 const PERSONALIZED_DEFAULT_COLLECTION_GID = '624856400219'
 // Langues du studio (l'ordre compte : FR d'abord)
 const STUDIO_LANGS = ['fr', 'en', 'de', 'nl', 'es']
-// Noms réservés aux panneaux foot (le validateur les bloque si type ≠ attendu)
-const STUDIO_RESERVED_PANELS = { photo: 'photo', team: 'choice', name: 'group', format: 'format' }
 // Types proposés à l'ajout (UNIQUEMENT ce que le moteur rend — cf. plan §4.2)
 const STEP_TYPE_META = {
   photo: { icon: '📷', label: 'Photo', desc: 'Upload d’une photo + juge photo (max 1)' },
@@ -51,8 +47,7 @@ const PHOTO_GRADES = [
    déjà traduite en 5 langues — l'ajout ne demande AUCUNE saisie (modifiable ensuite via ✎). */
 const STEP_CATALOG = [
   {
-    id: 'photo', icon: '📷', label: 'Photo du client',
-    desc: 'Le client envoie sa photo (une seule étape photo possible)',
+    id: 'photo', icon: '📷', label: 'Photo',
     step: {
       name: 'photo', type: 'photo', required: true, consent: { required: true }, payloadKey: 'photo',
       title: { fr: 'Votre photo', en: 'Your photo', de: 'Dein Foto', nl: 'Je foto', es: 'Tu foto' },
@@ -62,7 +57,6 @@ const STEP_CATALOG = [
   },
   {
     id: 'familyName', icon: '✏️', label: 'Nom de famille',
-    desc: 'Champ texte — ex. « Guetarni »',
     step: {
       name: 'familyName', type: 'text', required: true, maxLength: 24, charset: 'free', payloadKey: 'familyName',
       cartProperty: { label: { fr: 'Nom de famille', en: 'Family name', de: 'Familienname', nl: 'Familienaam', es: 'Apellido' } },
@@ -73,8 +67,7 @@ const STEP_CATALOG = [
     },
   },
   {
-    id: 'firstName', icon: '✏️', label: 'Prénom (un seul)',
-    desc: 'Champ texte — ex. « Lina »',
+    id: 'firstName', icon: '✏️', label: 'Prénom',
     step: {
       name: 'firstName', type: 'text', required: true, maxLength: 20, charset: 'letters', transform: 'uppercase', payloadKey: 'firstName',
       cartProperty: { label: { fr: 'Prénom', en: 'First name', de: 'Vorname', nl: 'Voornaam', es: 'Nombre' } },
@@ -85,8 +78,7 @@ const STEP_CATALOG = [
     },
   },
   {
-    id: 'memberNames', icon: '✏️', label: 'Prénoms (liste, dans l’ordre)',
-    desc: 'Plusieurs prénoms séparés par des virgules — pour nommer chaque personne',
+    id: 'memberNames', icon: '✏️', label: 'Prénoms (plusieurs)',
     step: {
       name: 'memberNames', type: 'text', required: true, maxLength: 140, charset: 'free', payloadKey: 'names',
       cartProperty: { label: { fr: 'Prénoms', en: 'First names', de: 'Vornamen', nl: 'Voornamen', es: 'Nombres' } },
@@ -99,7 +91,6 @@ const STEP_CATALOG = [
   },
   {
     id: 'birthDate', icon: '📅', label: 'Date de naissance',
-    desc: 'Sélecteur de date — écrite sur le poster',
     step: {
       name: 'birthDate', type: 'date', mode: 'date', required: true, payloadKey: 'birthDate',
       cartProperty: { label: { fr: 'Date de naissance', en: 'Date of birth', de: 'Geburtsdatum', nl: 'Geboortedatum', es: 'Fecha de nacimiento' } },
@@ -111,7 +102,6 @@ const STEP_CATALOG = [
   },
   {
     id: 'weddingDate', icon: '📅', label: 'Date de mariage',
-    desc: 'Sélecteur de date — écrite sur le poster',
     step: {
       name: 'weddingDate', type: 'date', mode: 'date', required: true, payloadKey: 'weddingDate',
       cartProperty: { label: { fr: 'Date du mariage', en: 'Wedding date', de: 'Hochzeitsdatum', nl: 'Trouwdatum', es: 'Fecha de la boda' } },
@@ -123,7 +113,6 @@ const STEP_CATALOG = [
   },
   {
     id: 'personalMessage', icon: '✏️', label: 'Message personnel',
-    desc: 'Petit texte libre — ex. une dédicace sous le dessin',
     step: {
       name: 'personalMessage', type: 'text', required: true, maxLength: 90, charset: 'free', payloadKey: 'personalMessage',
       cartProperty: { label: { fr: 'Message', en: 'Message', de: 'Botschaft', nl: 'Boodschap', es: 'Mensaje' } },
@@ -375,16 +364,13 @@ function renderStudioSteps() {
     cell.dataset.name = step.name
     cell.innerHTML =
       `<span class="ss-icon">${meta.icon}</span>` +
-      `<span class="ss-main"><span class="ss-name">${escapeHtml(step.name)}</span>` +
-      `<span class="ss-sub">${escapeHtml(step.type)}${step.title ? ' · ' + escapeHtml(t(step.title, 'fr')) : ''}</span></span>` +
+      `<span class="ss-main"><span class="ss-name">${escapeHtml(t(step.title, 'fr') || step.name)}</span></span>` +
       `<span class="ss-badge ${errs.length ? 'err' : 'ok'}">${errs.length ? '✗ ' + errs.length : '✓'}</span>` +
       `<span class="ss-actions">` +
       `<button class="ss-act ss-edit" title="Modifier">✎</button>` +
-      `<button class="ss-act ss-dup" title="Dupliquer"${step.type === 'photo' ? ' disabled' : ''}>⧉</button>` +
       `<button class="ss-act danger ss-del" title="Supprimer">🗑</button>` +
       `</span>`
     cell.querySelector('.ss-edit').addEventListener('click', (e) => { e.stopPropagation(); openStepEditor(i) })
-    cell.querySelector('.ss-dup').addEventListener('click', (e) => { e.stopPropagation(); duplicateStep(i) })
     cell.querySelector('.ss-del').addEventListener('click', (e) => { e.stopPropagation(); deleteStep(i) })
     attachStepDrag(cell)
     wrap.appendChild(cell)
@@ -670,7 +656,7 @@ async function runServerVerify() {
 function openStepEditor(index) {
   const step = pState.config.steps[index]
   pState.editing = { index, working: JSON.parse(JSON.stringify(step)) }
-  $('#studioStepTitle').textContent = `Modifier « ${step.name} » (${step.type})`
+  $('#studioStepTitle').textContent = `Modifier « ${t(step.title, 'fr') || step.name} »`
   renderStepEditorBody()
   $('#studioStepOverlay').classList.remove('hidden')
 }
@@ -698,56 +684,13 @@ function renderStepEditorBody() {
   const s = pState.editing.working
   const body = $('#studioStepBody')
   const parts = []
-  const nameReserved = s.type !== 'photo' && s.type !== 'format'
-  // nom + payloadKey
-  if (s.type === 'photo' || s.type === 'format') {
-    parts.push(fieldBlock('Nom technique (name)', 'Fixé par convention pour ce type.',
-      `<input type="text" value="${escapeHtml(s.name)}" disabled>`))
-  } else {
-    parts.push(fieldBlock('Nom technique (name)', 'Identifiant unique — minuscules/chiffres/_ (ex : coupleName).',
-      `<input type="text" id="sf-name" value="${escapeHtml(s.name)}"><p class="sf-err hidden" id="sf-name-err"></p>`))
-  }
-  if (s.type !== 'format')
-    parts.push(fieldBlock('Clé back-end (payloadKey)', 'Nom du champ transmis au back-end (défaut = name).',
-      `<input type="text" id="sf-payloadKey" value="${escapeHtml(s.payloadKey || '')}" placeholder="${escapeHtml(s.name)}">`))
-  // required
-  parts.push(`<label class="studio-check"><input type="checkbox" id="sf-required" ${s.required !== false ? 'checked' : ''}> Étape obligatoire</label>`)
-
-  // options par type
-  if (s.type === 'text') {
-    parts.push(`<div class="studio-row">
-      ${fieldBlock('Longueur max', '', `<input type="number" id="sf-maxLength" min="1" value="${s.maxLength || ''}">`)}
-      ${fieldBlock('Transformation', '', `<select id="sf-transform"><option value="none"${(s.transform || 'none') === 'none' ? ' selected' : ''}>Aucune</option><option value="uppercase"${s.transform === 'uppercase' ? ' selected' : ''}>MAJUSCULES</option></select>`)}
-      ${fieldBlock('Caractères', '', `<select id="sf-charset"><option value="free"${(s.charset || 'free') === 'free' ? ' selected' : ''}>Libres</option><option value="letters"${s.charset === 'letters' ? ' selected' : ''}>Lettres seules</option></select>`)}
-    </div>`)
-  }
-  if (s.type === 'number') {
-    parts.push(`<div class="studio-row">
-      ${fieldBlock('Min', '', `<input type="number" id="sf-min" value="${s.min ?? ''}">`)}
-      ${fieldBlock('Max', '', `<input type="number" id="sf-max" value="${s.max ?? ''}">`)}
-    </div>`)
-  }
-  if (s.type === 'date') {
-    parts.push(fieldBlock('Mode', 'Le moteur ne distingue que date et heure.',
-      `<select id="sf-mode"><option value="date"${(s.mode || 'date') === 'date' ? ' selected' : ''}>Date</option><option value="time"${s.mode === 'time' ? ' selected' : ''}>Heure</option></select>`))
-  }
-  // cartProperty (text/number/date)
-  if (s.type === 'text' || s.type === 'number' || s.type === 'date') {
-    parts.push(`<label class="studio-check"><input type="checkbox" id="sf-cartProp" ${s.cartProperty ? 'checked' : ''}> Afficher sur la ligne de commande</label>`)
-  }
-
-  // photo : consent + juge + policy + exemples
+  // Tout le technique est IMPOSÉ par le catalogue (name, payloadKey, obligatoire, longueur,
+  // transformation, caractères, mode de date, ligne de commande, consentement) : rien à montrer.
+  // Ne restent que les VRAIS choix : la photo (contrôle + règles + exemples) et les textes FR.
   if (s.type === 'photo') {
-    parts.push(`<label class="studio-check"><input type="checkbox" id="sf-consent" ${s.consent && s.consent.required !== false ? 'checked' : ''}> Consentement requis (photo de personnes)</label>`)
-    parts.push(`<label class="studio-check"><input type="checkbox" id="sf-photoCheck" ${s.photoCheck ? 'checked' : ''}> Activer le contrôle photo (juge)</label>`)
+    parts.push(`<label class="studio-check"><input type="checkbox" id="sf-photoCheck" ${s.photoCheck ? 'checked' : ''}> Contrôler automatiquement la photo du client</label>`)
     parts.push(renderPhotoPolicyEditor(s))
     parts.push(renderPhotoExamplesEditor(s))
-  }
-
-  // format : rôles figés (lecture seule)
-  if (s.type === 'format') {
-    parts.push(`<div class="studio-sub"><p class="studio-sub-title">Rôles (figés)</p>
-      <p class="sf-help">size → format (dimensions) · frame → frame (slug). Forme imposée par le moteur — non éditable.</p></div>`)
   }
 
   // champs i18n
@@ -765,8 +708,7 @@ function renderStepEditorBody() {
 function renderPhotoPolicyEditor(s) {
   const pol = s.photoPolicy || null
   if (!pol) {
-    return `<div class="studio-sub"><p class="studio-sub-title">Juge photo</p>
-      <p class="sf-help">Aucune politique définie. Activez le contrôle photo puis rechargez le preset famille pour une base.</p></div>`
+    return ''
   }
   const angleRows = PHOTO_ANGLES.map((a) => {
     const cur = (pol.angles && pol.angles[a.key]) || 'warn'
@@ -777,16 +719,16 @@ function renderPhotoPolicyEditor(s) {
   }).join('')
   const isGroup = pol.subject === 'group'
   return `<div class="studio-sub" id="sf-policy">
-    <p class="studio-sub-title">Juge photo (photoPolicy)</p>
+    <p class="studio-sub-title">Règles de la photo</p>
     <div class="studio-row">
       ${fieldBlock('Sujet', '', `<select id="sf-pol-subject"><option value="person"${!isGroup ? ' selected' : ''}>Une personne</option><option value="group"${isGroup ? ' selected' : ''}>Un groupe</option></select>`)}
       ${fieldBlock('Cadrage', '', `<select id="sf-pol-framing"><option value="face"${pol.framing !== 'full-body' ? ' selected' : ''}>Visage</option><option value="full-body"${pol.framing === 'full-body' ? ' selected' : ''}>En pied</option></select>`)}
     </div>
     <div class="studio-row" id="sf-pol-people" ${isGroup ? '' : 'style="display:none"'}>
       ${fieldBlock('Personnes min', '', `<input type="number" id="sf-pol-min" min="1" value="${(pol.people && pol.people.min) ?? 1}">`)}
-      ${fieldBlock('Personnes max', 'Doit égaler recette tokens.max si les deux existent.', `<input type="number" id="sf-pol-max" min="1" value="${(pol.people && pol.people.max) ?? 6}">`)}
+      ${fieldBlock('Personnes max', '', `<input type="number" id="sf-pol-max" min="1" value="${(pol.people && pol.people.max) ?? 6}">`)}
     </div>
-    <p class="sf-help">Angle détecté → grade (🟢 parfait / 🟡 accepté / 🔴 refusé). L’angle « parfait » devient la consigne photo (faceAngle).</p>
+    <p class="sf-help">Pour chaque angle de prise de vue : 🟢 parfait · 🟡 accepté · 🔴 refusé.</p>
     <div class="angle-grid">${angleRows}</div>
   </div>`
 }
@@ -815,12 +757,6 @@ function wireStepEditorEvents() {
       map.fr = inp.value
     })
   )
-  // nom : validation live (regex + réservé + unicité)
-  const nameInp = $('#sf-name')
-  if (nameInp) nameInp.addEventListener('input', validateEditorName)
-  // cartProperty : re-render (fait apparaître/disparaître le libellé i18n)
-  const cartCb = $('#sf-cartProp')
-  if (cartCb) cartCb.addEventListener('change', () => { collectSimpleFields(); s.cartProperty = cartCb.checked ? (s.cartProperty || { label: { fr: '' } }) : undefined; if (!cartCb.checked) delete s.cartProperty; renderStepEditorBody() })
   // photoCheck : bascule photoPolicy (re-render)
   const pcCb = $('#sf-photoCheck')
   if (pcCb) pcCb.addEventListener('change', () => {
@@ -854,46 +790,14 @@ function wireStepEditorEvents() {
     })
   }
 }
-function validateEditorName() {
-  const inp = $('#sf-name')
-  const err = $('#sf-name-err')
-  const s = pState.editing.working
-  const name = inp.value.trim()
-  let msg = ''
-  if (!STEP_NAME_RE.test(name)) msg = 'Format : commence par une minuscule, puis lettres/chiffres/_.'
-  else if (name in STUDIO_RESERVED_PANELS && STUDIO_RESERVED_PANELS[name] !== s.type)
-    msg = `« ${name} » est réservé au panneau foot "${name}" (type ${STUDIO_RESERVED_PANELS[name]}). Renomme (ex : ${name}Field).`
-  else if (pState.config.steps.some((st, i) => i !== pState.editing.index && st.name === name))
-    msg = 'Ce nom est déjà utilisé par une autre étape.'
-  inp.classList.toggle('invalid', !!msg)
-  err.textContent = msg
-  err.classList.toggle('hidden', !msg)
-  return !msg
-}
-// Lit les champs simples (hors i18n) du DOM vers l'objet working.
+// Lit les champs simples (hors i18n) du DOM vers l'objet working. Tout le technique
+// (name/payloadKey/required/bornes/mode/consent/cartProperty) est IMPOSÉ par le catalogue :
+// seule la photo a de vrais réglages (contrôle + règles).
 function collectSimpleFields() {
   const s = pState.editing.working
   const val = (id) => { const el = $(id); return el ? el.value : undefined }
   const num = (id) => { const v = val(id); return v === '' || v == null ? undefined : parseInt(v, 10) }
-  if ($('#sf-name')) s.name = val('#sf-name').trim()
-  if ($('#sf-payloadKey') != null && s.type !== 'format') {
-    const pk = ($('#sf-payloadKey').value || '').trim()
-    if (pk) s.payloadKey = pk; else delete s.payloadKey
-  }
-  if ($('#sf-required')) s.required = $('#sf-required').checked
-  if (s.type === 'text') {
-    const ml = num('#sf-maxLength'); if (ml) s.maxLength = ml; else delete s.maxLength
-    s.transform = val('#sf-transform') || 'none'
-    s.charset = val('#sf-charset') || 'free'
-  }
-  if (s.type === 'number') {
-    const mn = num('#sf-min'), mx = num('#sf-max')
-    if (mn != null) s.min = mn; else delete s.min
-    if (mx != null) s.max = mx; else delete s.max
-  }
-  if (s.type === 'date') s.mode = val('#sf-mode') || 'date'
   if (s.type === 'photo') {
-    if ($('#sf-consent')) s.consent = { required: $('#sf-consent').checked }
     if ($('#sf-photoCheck')) s.photoCheck = $('#sf-photoCheck').checked
     if (s.photoPolicy && $('#sf-pol-subject')) {
       const pol = s.photoPolicy
@@ -905,14 +809,13 @@ function collectSimpleFields() {
       const angles = {}
       $$('#studioStepBody .angle-opt.on').forEach((b) => { angles[b.dataset.angle] = b.dataset.grade })
       pol.angles = angles
-      // faceAngle déduit = angle « parfait » (repli front)
+      // consigne photo déduite = angle marqué 🟢 (repli : face)
       const perfect = Object.entries(angles).find(([, g]) => g === 'perfect')
       s.faceAngle = perfect ? perfect[0] : 'front'
     }
   }
 }
 function saveStepEditor() {
-  if ($('#sf-name') && !validateEditorName()) return toast('Corrige le nom de l’étape.', 'err')
   collectSimpleFields()
   pruneEmptyI18nMaps(pState.editing.working) // retire les maps optionnelles restées vides
   pState.config.steps[pState.editing.index] = pState.editing.working
@@ -927,13 +830,12 @@ function saveStepEditor() {
 function openTypePicker() {
   const list = $('#studioTypeList')
   const photoFull = $('#studioAddStep').dataset.photoFull === '1'
-  list.innerHTML =
-    '<p class="card-note">Tout est prérempli et déjà traduit en 5 langues — modifiable ensuite via ✎.</p>' +
-    STEP_CATALOG.map((entry, i) => {
-      const dis = entry.step.type === 'photo' && photoFull
-      return `<button class="section-opt" data-catalog="${i}" ${dis ? 'disabled' : ''}>
-      <span>${entry.icon} ${escapeHtml(entry.label)}${dis ? ' — déjà présente' : ''}<span class="st-desc"> ${escapeHtml(entry.desc)}</span></span></button>`
-    }).join('')
+  // Épuré : le NOM seul (règle UX). La seule mention ajoutée est la raison d'un choix grisé.
+  list.innerHTML = STEP_CATALOG.map((entry, i) => {
+    const dis = entry.step.type === 'photo' && photoFull
+    return `<button class="section-opt" data-catalog="${i}" ${dis ? 'disabled' : ''}>
+      <span>${entry.icon} ${escapeHtml(entry.label)}${dis ? ' — déjà présente' : ''}</span></button>`
+  }).join('')
   list.querySelectorAll('.section-opt').forEach((b) =>
     b.addEventListener('click', () => {
       if (b.disabled) return
@@ -962,16 +864,6 @@ function addCatalogStep(entry) {
   if (fmtIdx >= 0) steps.splice(fmtIdx, 0, step); else steps.push(step)
   onConfigChanged()
   toast(`« ${entry.label} » ajoutée ✓ — déjà traduite, rien à remplir`, 'ok')
-}
-function duplicateStep(index) {
-  const src = pState.config.steps[index]
-  if (src.type === 'format' || src.type === 'photo') return
-  const copy = JSON.parse(JSON.stringify(src))
-  copy.name = uniqueStepName(src.name)
-  copy.payloadKey = copy.name
-  pState.config.steps.splice(index + 1, 0, copy)
-  onConfigChanged()
-  toast('Étape dupliquée ✓', 'ok')
 }
 function deleteStep(index) {
   const s = pState.config.steps[index]
