@@ -97,11 +97,8 @@
           <option value="photo-simple">Photo simple — photo → format</option>
         </select>
       </div>
-      <div class="field">
-        <label>Nom de code du produit (optionnel)</label>
-        <input type="text" id="studioProductType" class="decor-vibe" placeholder="vide = généré automatiquement à la publication" autocomplete="off" autocapitalize="none" spellcheck="false">
-        <p class="card-note" id="studioProductTypeHint">Identifiant interne unique (routage back-end + statistiques). Laisse vide : il sera dérivé automatiquement du titre généré par l'IA.</p>
-      </div>
+      <!-- Le nom de code (productType) n'est PLUS saisi ici : généré automatiquement à la
+           publication (dérivé du titre IA, unicité garantie côté back). -->
       <div id="studioSteps" class="studio-steps"></div>
       <p id="studioEmpty" class="empty">Choisissez un preset : les étapes du parcours client se chargeront ici.</p>
       <button id="studioAddStep" class="ghost-btn hidden">＋ Ajouter une étape</button>
