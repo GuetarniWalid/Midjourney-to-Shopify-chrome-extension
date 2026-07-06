@@ -61,7 +61,7 @@ const STEP_CATALOG = [
       name: 'familyName', type: 'text', required: true, maxLength: 24, charset: 'free', payloadKey: 'familyName',
       cartProperty: { label: { fr: 'Nom de famille', en: 'Family name', de: 'Familienname', nl: 'Familienaam', es: 'Apellido' } },
       title: { fr: 'Votre nom de famille', en: 'Your family name', de: 'Dein Familienname', nl: 'Je familienaam', es: 'Tu apellido' },
-      label: { fr: 'Nom affiché sous le dessin', en: 'Name shown under the artwork', de: 'Name unter der Zeichnung', nl: 'Naam onder de tekening', es: 'Nombre mostrado bajo el dibujo' },
+      label: { fr: 'Nom affiché sur le poster', en: 'Name shown on the poster', de: 'Name auf dem Poster', nl: 'Naam op de poster', es: 'Nombre mostrado en el póster' },
       placeholder: { fr: 'Ex : Guetarni', en: 'E.g. Guetarni', de: 'z. B. Guetarni', nl: 'Bijv. Guetarni', es: 'Ej.: Guetarni' },
       checkpointLabel: { fr: 'Nom', en: 'Name', de: 'Name', nl: 'Naam', es: 'Apellido' },
     },
@@ -150,18 +150,6 @@ const RECIPE_ADVANCED = [
 
 /* ---------- Helpers i18n ---------- */
 const t = (map, lang) => (map && typeof map === 'object' ? map[lang] || map.fr || '' : typeof map === 'string' ? map : '')
-// Assure un chemin `a.b.c` dans un objet et renvoie la map i18n (créée = { fr:'' } si absente).
-function ensureI18nMap(root, dotPath) {
-  const parts = dotPath.split('.')
-  let node = root
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (!node[parts[i]] || typeof node[parts[i]] !== 'object') node[parts[i]] = {}
-    node = node[parts[i]]
-  }
-  const leaf = parts[parts.length - 1]
-  if (!node[leaf] || typeof node[leaf] !== 'object' || Array.isArray(node[leaf])) node[leaf] = { fr: '' }
-  return node[leaf]
-}
 // Lecture seule : map i18n présente à ce chemin (sans rien créer), sinon null.
 function getI18nMap(root, dotPath) {
   const parts = dotPath.split('.')
@@ -171,57 +159,6 @@ function getI18nMap(root, dotPath) {
     node = node[p]
   }
   return node && typeof node === 'object' && !Array.isArray(node) ? node : null
-}
-// Supprime la feuille au chemin donné (pour élaguer une map i18n devenue vide).
-function deleteAtPath(root, dotPath) {
-  const parts = dotPath.split('.')
-  let node = root
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (!node || typeof node !== 'object') return
-    node = node[parts[i]]
-  }
-  if (node && typeof node === 'object') delete node[parts[parts.length - 1]]
-}
-const i18nMapEmpty = (map) => !map || STUDIO_LANGS.every((l) => !(typeof map[l] === 'string' && map[l].trim()))
-// Élague les maps i18n ENTIÈREMENT vides (l'ouverture de l'éditeur en crée pour les champs
-// optionnels via ensureI18nMap). Une map partiellement remplie (FR seul) est CONSERVÉE -> elle
-// déclenche la règle des 5 langues, ce qui est voulu.
-function pruneEmptyI18nMaps(step) {
-  const paths = [
-    'title', 'checkpointLabel', 'label', 'placeholder', 'help', 'cartProperty.label',
-    'examples.good.alt', 'examples.bad.alt', 'examples.bad.caption',
-    'photoPolicy.messages.warn_angle', 'photoPolicy.messages.reject_framing',
-  ]
-  for (const p of paths) {
-    const map = getI18nMap(step, p)
-    if (map && i18nMapEmpty(map)) deleteAtPath(step, p)
-  }
-}
-
-/* ---------- Champs i18n par type d'étape ---------- */
-// Renvoie la liste des champs i18n éditables d'une étape : { path, label, kind:'line'|'multiline' }.
-function i18nFieldsOf(step) {
-  const fields = [
-    { path: 'title', label: 'Titre de l’étape', kind: 'line' },
-    { path: 'checkpointLabel', label: 'Pastille (parcours)', kind: 'line' },
-  ]
-  if (step.type === 'text' || step.type === 'number' || step.type === 'date') {
-    fields.push({ path: 'label', label: 'Libellé du champ', kind: 'line' })
-    if (step.type === 'text') fields.push({ path: 'placeholder', label: 'Exemple (placeholder)', kind: 'line' })
-    fields.push({ path: 'help', label: 'Aide (optionnel)', kind: 'multiline' })
-    if (step.cartProperty)
-      fields.push({ path: 'cartProperty.label', label: 'Libellé sur la ligne de commande', kind: 'line' })
-  }
-  if (step.type === 'photo') {
-    fields.push({ path: 'examples.good.alt', label: 'Alt — bonne photo', kind: 'multiline' })
-    fields.push({ path: 'examples.bad.alt', label: 'Alt — photo à éviter', kind: 'multiline' })
-    fields.push({ path: 'examples.bad.caption', label: 'Légende — photo à éviter', kind: 'line' })
-    if (step.photoPolicy) {
-      fields.push({ path: 'photoPolicy.messages.warn_angle', label: 'Message 🟡 (angle accepté)', kind: 'multiline' })
-      fields.push({ path: 'photoPolicy.messages.reject_framing', label: 'Message 🔴 (cadrage refusé)', kind: 'multiline' })
-    }
-  }
-  return fields
 }
 // Toutes les maps i18n PRÉSENTES d'une étape (lecture seule, pour validation/traduction).
 function existingI18nMaps(step) {
@@ -367,10 +304,11 @@ function renderStudioSteps() {
       `<span class="ss-main"><span class="ss-name">${escapeHtml(t(step.title, 'fr') || step.name)}</span></span>` +
       `<span class="ss-badge ${errs.length ? 'err' : 'ok'}">${errs.length ? '✗ ' + errs.length : '✓'}</span>` +
       `<span class="ss-actions">` +
-      `<button class="ss-act ss-edit" title="Modifier">✎</button>` +
+      (step.type === 'photo' ? `<button class="ss-act ss-edit" title="Régler la photo">✎</button>` : '') +
       `<button class="ss-act danger ss-del" title="Supprimer">🗑</button>` +
       `</span>`
-    cell.querySelector('.ss-edit').addEventListener('click', (e) => { e.stopPropagation(); openStepEditor(i) })
+    const editBtn = cell.querySelector('.ss-edit')
+    if (editBtn) editBtn.addEventListener('click', (e) => { e.stopPropagation(); openStepEditor(i) })
     cell.querySelector('.ss-del').addEventListener('click', (e) => { e.stopPropagation(); deleteStep(i) })
     attachStepDrag(cell)
     wrap.appendChild(cell)
@@ -668,39 +606,18 @@ function closeStepEditor() {
 function fieldBlock(label, help, controlHtml) {
   return `<div class="studio-field"><label>${escapeHtml(label)}</label>${controlHtml}${help ? `<p class="sf-help">${escapeHtml(help)}</p>` : ''}</div>`
 }
-// Bloc champ de texte : FRANÇAIS UNIQUEMENT — les 4 autres langues sont générées
-// automatiquement par le backend à la publication (rien à voir, rien à faire ici).
-function i18nBlock(field, map) {
-  const ctrl =
-    field.kind === 'multiline'
-      ? `<textarea data-i18n="${escapeHtml(field.path)}" data-lang="fr">${escapeHtml(map.fr || '')}</textarea>`
-      : `<input type="text" data-i18n="${escapeHtml(field.path)}" data-lang="fr" value="${escapeHtml(map.fr || '')}">`
-  return `<div class="i18n-field" data-i18n-field="${escapeHtml(field.path)}">
-    <div class="i18n-head"><label>${escapeHtml(field.label)}</label></div>
-    ${ctrl}
-  </div>`
-}
 function renderStepEditorBody() {
   const s = pState.editing.working
   const body = $('#studioStepBody')
   const parts = []
-  // Tout le technique est IMPOSÉ par le catalogue (name, payloadKey, obligatoire, longueur,
-  // transformation, caractères, mode de date, ligne de commande, consentement) : rien à montrer.
-  // Ne restent que les VRAIS choix : la photo (contrôle + règles + exemples) et les textes FR.
+  // TOUT est préfabriqué par le catalogue (textes compris, traduits à la publication) : plus
+  // aucun champ de texte éditable. Seule la PHOTO a de vrais réglages — contrôle automatique,
+  // règles, exemples. (L'éditeur ne s'ouvre d'ailleurs que pour elle.)
   if (s.type === 'photo') {
     parts.push(`<label class="studio-check"><input type="checkbox" id="sf-photoCheck" ${s.photoCheck ? 'checked' : ''}> Contrôler automatiquement la photo du client</label>`)
     parts.push(renderPhotoPolicyEditor(s))
     parts.push(renderPhotoExamplesEditor(s))
   }
-
-  // champs i18n
-  parts.push('<div class="studio-sub"><p class="studio-sub-title">Textes (en français — traduits automatiquement à la publication)</p>')
-  for (const f of i18nFieldsOf(s)) {
-    // cartProperty.label n'existe que si la case est cochée
-    if (f.path === 'cartProperty.label' && !s.cartProperty) continue
-    parts.push(i18nBlock(f, ensureI18nMap(s, f.path)))
-  }
-  parts.push('</div>')
 
   body.innerHTML = parts.join('')
   wireStepEditorEvents()
@@ -749,14 +666,6 @@ function renderPhotoExamplesEditor(s) {
 // Câble les events du corps de l'éditeur (une fois rendu).
 function wireStepEditorEvents() {
   const s = pState.editing.working
-  // saisie des textes : FRANÇAIS uniquement — les autres langues sont régénérées par le
-  // backend à la publication (une seule vérité : le FR de Walid).
-  $$('#studioStepBody [data-i18n]').forEach((inp) =>
-    inp.addEventListener('input', () => {
-      const map = ensureI18nMap(s, inp.dataset.i18n)
-      map.fr = inp.value
-    })
-  )
   // photoCheck : bascule photoPolicy (re-render)
   const pcCb = $('#sf-photoCheck')
   if (pcCb) pcCb.addEventListener('change', () => {
@@ -817,7 +726,6 @@ function collectSimpleFields() {
 }
 function saveStepEditor() {
   collectSimpleFields()
-  pruneEmptyI18nMaps(pState.editing.working) // retire les maps optionnelles restées vides
   pState.config.steps[pState.editing.index] = pState.editing.working
   closeStepEditor()
   onConfigChanged()

@@ -73,7 +73,7 @@
       "payloadKey": "familyName",
       "cartProperty": { "label": { "fr": "Nom de famille", "en": "Family name", "de": "Familienname", "nl": "Familienaam", "es": "Apellido" } },
       "title": { "fr": "Votre nom de famille", "en": "Your family name", "de": "Dein Familienname", "nl": "Je familienaam", "es": "Tu apellido" },
-      "label": { "fr": "Nom affiché sous le dessin", "en": "Name shown under the artwork", "de": "Name unter der Zeichnung", "nl": "Naam onder de tekening", "es": "Nombre mostrado bajo el dibujo" },
+      "label": { "fr": "Nom affiché sur le poster", "en": "Name shown on the poster", "de": "Name auf dem Poster", "nl": "Naam op de poster", "es": "Nombre mostrado en el póster" },
       "placeholder": { "fr": "Ex : Guetarni", "en": "E.g. Guetarni", "de": "z. B. Guetarni", "nl": "Bijv. Guetarni", "es": "Ej.: Guetarni" },
       "checkpointLabel": { "fr": "Nom", "en": "Name", "de": "Name", "nl": "Naam", "es": "Apellido" }
     },
