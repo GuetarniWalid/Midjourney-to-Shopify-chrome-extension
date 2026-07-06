@@ -593,6 +593,7 @@ async function runServerVerify() {
 /* ---------- Éditeur d'étape (overlay) ---------- */
 function openStepEditor(index) {
   const step = pState.config.steps[index]
+  pendingExamples = null // une proposition IA non validée d'une session précédente ne survit pas
   pState.editing = { index, working: JSON.parse(JSON.stringify(step)) }
   $('#studioStepTitle').textContent = `Modifier « ${t(step.title, 'fr') || step.name} »`
   renderStepEditorBody()
@@ -659,9 +660,99 @@ function renderPhotoExamplesEditor(s) {
       <input type="file" accept="image/*" id="sf-ex-${kind}" class="decor-vibe">
     </div>`
   return `<div class="studio-sub"><p class="studio-sub-title">Exemples photo</p>
-    <p class="sf-help">Images envoyées dans Shopify Files à la publication. Leurs textes sont plus bas.</p>
     <div class="photo-ex">${slot('good', goodSrc, 'Bonne photo')}${slot('bad', badSrc, 'Photo à éviter')}</div>
+    <button type="button" class="ghost-btn" id="sf-ex-generate">✨ Générer les 2 exemples par IA (selon votre design)</button>
+    <div id="sf-ex-loading" class="resize-loading hidden">
+      <div class="progress-ring"></div>
+      <p id="sf-ex-loading-msg">Génération des exemples… (~20-40s)</p>
+    </div>
+    <div id="sf-ex-pending" class="resize-actions hidden">
+      <button type="button" class="primary-btn" id="sf-ex-accept">Utiliser ces exemples ✓</button>
+      <button type="button" class="ghost-btn" id="sf-ex-regen">↻ Régénérer</button>
+      <button type="button" class="ghost-btn" id="sf-ex-reject">✕ Annuler</button>
+    </div>
   </div>`
+}
+// Proposition IA en attente (bonne+mauvaise) — validée/refusée avant d'entrer dans pState.
+let pendingExamples = null
+// Job asynchrone (même patron anti-524 que le décor : start -> polling).
+async function callPhotoExamplesJob(body) {
+  let startRes, startData
+  try {
+    ;({ res: startRes, data: startData } = await fetchJsonT(
+      API + '/api/generate-photo-examples',
+      { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) },
+      90000
+    ))
+  } catch (e) {
+    throw new Error(e.name === 'AbortError' ? 'Le service met trop de temps à démarrer. Réessaye.' : 'Connexion au serveur impossible.')
+  }
+  if (startRes.status === 401) throw new Error('Session expirée — reconnecte-toi.')
+  const jobId = startData.data && startData.data.jobId
+  if (!startRes.ok || !startData.success || !jobId) {
+    throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
+  }
+  const startedAt = Date.now()
+  const MAX_MS = 11 * 60 * 1000
+  let netErrors = 0
+  while (true) {
+    if (Date.now() - startedAt > MAX_MS) throw new Error('La génération a expiré. Réessaye.')
+    await sleep(3000)
+    let res, data
+    try {
+      ;({ res, data } = await fetchJsonT(
+        API + '/api/generate-photo-examples/result?id=' + encodeURIComponent(jobId),
+        { headers: { Accept: 'application/json' } },
+        20000
+      ))
+    } catch (e) {
+      if (++netErrors > 6) throw new Error('Connexion interrompue pendant la génération.')
+      continue
+    }
+    netErrors = 0
+    if (res.status === 404 || data.status === 'not_found') throw new Error('Session de génération expirée. Relance.')
+    if (data.status === 'error') throw new Error(data.message || 'Échec de la génération.')
+    if (data.status === 'done' && data.data && data.data.good && data.data.bad) return data.data
+  }
+}
+// Règles envoyées au générateur : dérivées de la photoPolicy de l'étape (déterministe).
+function photoExamplesPolicyOf(step) {
+  const pol = step.photoPolicy || {}
+  const angles = pol.angles || {}
+  const perfect = Object.entries(angles).find(([, g]) => g === 'perfect')
+  const rejects = Object.entries(angles).filter(([, g]) => g === 'reject').map(([a]) => a)
+  return {
+    subject: pol.subject,
+    framing: pol.framing,
+    peopleMin: pol.people && pol.people.min,
+    peopleMax: pol.people && pol.people.max,
+    perfectAngle: (perfect && perfect[0]) || step.faceAngle || 'front',
+    rejectAngles: rejects,
+  }
+}
+async function generatePhotoExamples(step) {
+  if (!state.imageDataUrl) return toast("Ajoute d'abord ton design (carte 1) — les exemples en dérivent.", 'err')
+  if (state.needsResize) return toast("Retaille d'abord l'image au bon format.", 'err')
+  const btn = $('#sf-ex-generate')
+  btn.disabled = true
+  $('#sf-ex-loading').classList.remove('hidden')
+  $('#sf-ex-pending').classList.add('hidden')
+  try {
+    const { good, bad } = await callPhotoExamplesJob({
+      artwork: state.imageDataUrl,
+      policy: photoExamplesPolicyOf(step),
+    })
+    pendingExamples = { good, bad }
+    // proposition affichée dans les slots ; validée seulement via « Utiliser »
+    $('#sf-ex-good-img').src = good
+    $('#sf-ex-bad-img').src = bad
+    $('#sf-ex-pending').classList.remove('hidden')
+  } catch (e) {
+    toast('Exemples : ' + e.message, 'err')
+  } finally {
+    $('#sf-ex-loading').classList.add('hidden')
+    btn.disabled = false
+  }
 }
 // Câble les events du corps de l'éditeur (une fois rendu).
 function wireStepEditorEvents() {
@@ -686,7 +777,7 @@ function wireStepEditorEvents() {
       btn.classList.add('on')
     })
   )
-  // exemples photo (base64 en attente)
+  // exemples photo (base64 en attente) — un upload manuel annule une proposition IA en cours
   for (const kind of ['good', 'bad']) {
     const inp = $(`#sf-ex-${kind}`)
     if (!inp) continue
@@ -694,8 +785,33 @@ function wireStepEditorEvents() {
       const f = e.target.files && e.target.files[0]
       if (!f || !f.type.startsWith('image/')) return
       const reader = new FileReader()
-      reader.onload = () => { pState.photoExamples[kind] = reader.result; $(`#sf-ex-${kind}-img`).src = reader.result }
+      reader.onload = () => {
+        pendingExamples = null
+        $('#sf-ex-pending').classList.add('hidden')
+        pState.photoExamples[kind] = reader.result
+        $(`#sf-ex-${kind}-img`).src = reader.result
+      }
       reader.readAsDataURL(f)
+    })
+  }
+  // génération IA des 2 exemples + accepter / régénérer / annuler la proposition
+  const genBtn = $('#sf-ex-generate')
+  if (genBtn) {
+    genBtn.addEventListener('click', () => generatePhotoExamples(s))
+    $('#sf-ex-accept').addEventListener('click', () => {
+      if (!pendingExamples) return
+      pState.photoExamples = { good: pendingExamples.good, bad: pendingExamples.bad }
+      pendingExamples = null
+      $('#sf-ex-pending').classList.add('hidden')
+      toast('Exemples adoptés ✓', 'ok')
+    })
+    $('#sf-ex-regen').addEventListener('click', () => generatePhotoExamples(s))
+    $('#sf-ex-reject').addEventListener('click', () => {
+      pendingExamples = null
+      $('#sf-ex-pending').classList.add('hidden')
+      // retour aux exemples adoptés (ou vide)
+      $('#sf-ex-good-img').src = pState.photoExamples.good || ''
+      $('#sf-ex-bad-img').src = pState.photoExamples.bad || ''
     })
   }
 }
