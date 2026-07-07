@@ -392,7 +392,9 @@ function renderRecipeForm() {
   r.reference = r.reference || { texts: {} }
   r.reference.texts = r.reference.texts || {}
   r.prompt = r.prompt || {}
-  r.judge = r.judge || {}
+  // Contrôle qualité : TOUJOURS actif (imposé, plus d'UI). Valeurs explicites dans le JSON —
+  // le défaut backend est Boolean(tokens), on ne s'y fie pas.
+  r.judge = { text: true, figureCount: true }
   const P = []
 
   // Moteur : PAS d'UI — mêmes réglages pour tous les produits. Le ratio est déduit de l'image
@@ -424,12 +426,7 @@ function renderRecipeForm() {
     P.push(fieldBlock(f.label, '', `<textarea data-recipe="prompt.${f.key}">${escapeHtml(r.prompt[f.key] || '')}</textarea>`))
   P.push('</div></div>')
 
-  // Juge
-  P.push('<div class="studio-sub"><p class="studio-sub-title">Contrôle qualité automatique</p>')
-  P.push(`<p class="sf-help">Avant de montrer le résultat au client, l'IA vérifie chaque version générée. Laisser coché.</p>`)
-  P.push(`<label class="studio-check"><input type="checkbox" data-recipe-judge="text" ${r.judge.text !== false ? 'checked' : ''}> Vérifier que les prénoms/titre sont bien écrits</label>`)
-  P.push(`<label class="studio-check"><input type="checkbox" data-recipe-judge="figureCount" ${r.judge.figureCount !== false ? 'checked' : ''}> Vérifier le nombre de personnes dessinées</label>`)
-  P.push('</div>')
+  // (contrôle qualité : plus d'UI — toujours actif, cf. r.judge imposé plus haut)
 
   wrap.innerHTML = P.join('')
   wireRecipeEvents()
@@ -449,10 +446,6 @@ function wireRecipeEvents() {
   )
   // (inputs.tokens, inputs.title, reference.texts.* : plus aucune UI — tokens synchronisés
   // depuis les étapes, titre/slots lus sur le design par le backend à la publication)
-  // juge
-  $$('#recipeForm [data-recipe-judge]').forEach((el) =>
-    el.addEventListener('change', () => { pState.recipe.judge[el.dataset.recipeJudge] = el.checked })
-  )
   // référence = design ?
   const same = $('#rf-sameAsDesign')
   if (same) same.addEventListener('change', () => {
