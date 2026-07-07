@@ -399,26 +399,19 @@ function renderRecipeForm() {
   // (carte 1) ; modèle/versions/essais gardent les défauts du preset (gemini-3-pro-image, 3, 2).
   r.aspect = recipeAspectFromImage()
 
-  // Entrées : mapping 100 % AUTOMATIQUE et SILENCIEUX — les prénoms viennent de l'étape
-  // « Prénoms (liste) » (ou « Prénom »), le max suit le juge photo. Seul l'actionnable est
-  // affiché : le TITRE peint sur le poster.
+  // Entrées : mapping 100 % AUTOMATIQUE et SILENCIEUX — prénoms depuis les étapes, max depuis
+  // le juge photo. La table de remplacement des textes (titre écrit sur le design, légendes par
+  // sujet, template du titre) est LUE SUR LE DESIGN par le backend à la publication (vision) :
+  // plus aucun champ ici — les valeurs du préréglage restent en secours dans le JSON.
   syncRecipeTokens(r)
-  const titleKeys = configInputSteps().filter((s) => s.type !== 'photo').map((s) => `{${s.key}}`)
-  P.push('<div class="studio-sub"><p class="studio-sub-title">Titre peint sur le poster</p>')
-  P.push(`<div class="studio-field"><input type="text" data-recipe-title="template" value="${escapeHtml((r.inputs.title && r.inputs.title.template) || '')}"><p class="sf-help">Champs utilisables : ${escapeHtml(titleKeys.join(' ') || '—')}.</p></div>`)
-  P.push('</div>')
 
-  // Référence de style
+  // Référence de style : seul vrai choix — le design (défaut) ou une autre image.
   P.push('<div class="studio-sub"><p class="studio-sub-title">Référence de style</p>')
   P.push(`<label class="studio-check"><input type="checkbox" id="rf-sameAsDesign" ${pState.recipeSameAsDesign ? 'checked' : ''}> Le design d’exemple (carte 1) EST la référence</label>`)
   P.push(`<div id="rf-upload" class="${pState.recipeSameAsDesign ? 'hidden' : ''}">
-    ${fieldBlock('Image de référence', 'Image de style écrite (titre + slots).', `<input type="file" accept="image/*" id="rf-styleRef" class="decor-vibe">`)}
+    ${fieldBlock('Image de référence', '', `<input type="file" accept="image/*" id="rf-styleRef" class="decor-vibe">`)}
     <div class="photo-ex-slot"><img id="rf-styleRef-img" src="${pState.styleRef || ''}" alt="" ${pState.styleRef ? '' : 'style="min-height:80px"'}></div>
   </div>`)
-  P.push(fieldBlock('Titre écrit sur la référence', 'Ex : The Smith Family (source de la substitution du titre).',
-    `<input type="text" data-recipe="reference.texts.title" value="${escapeHtml(r.reference.texts.title || '')}">`))
-  P.push(fieldBlock('Textes-slots (séparés par des virgules)', 'Ex : DADDY, FRANCO, MOMMY, VERONICA.',
-    `<input type="text" id="rf-slots" value="${escapeHtml((r.reference.texts.slots || []).join(', '))}">`))
   P.push('</div>')
 
   // Prompt
@@ -449,26 +442,13 @@ function wireRecipeEvents() {
       const path = el.dataset.recipe
       let v = el.value
       if (path === 'candidates' || path === 'maxAttempts') v = parseInt(v, 10) || 0
-      if (path === 'reference.texts.title') v = v.trim() || null
       setRecipePath(path, v)
       renderRecipeValidation()
       refreshAction()
     })
   )
-  // (inputs.tokens : plus aucune UI — synchronisé silencieusement par syncRecipeTokens)
-  // titre (inputs.title.template)
-  const titleEl = $('#recipeForm [data-recipe-title="template"]')
-  if (titleEl) titleEl.addEventListener('input', () => {
-    const tpl = titleEl.value.trim()
-    if (!tpl) delete pState.recipe.inputs.title
-    else pState.recipe.inputs.title = { template: tpl, required: true }
-    renderRecipeValidation(); refreshAction()
-  })
-  // slots
-  const slotsEl = $('#rf-slots')
-  if (slotsEl) slotsEl.addEventListener('input', () => {
-    pState.recipe.reference.texts.slots = slotsEl.value.split(',').map((s) => s.trim()).filter(Boolean)
-  })
+  // (inputs.tokens, inputs.title, reference.texts.* : plus aucune UI — tokens synchronisés
+  // depuis les étapes, titre/slots lus sur le design par le backend à la publication)
   // juge
   $$('#recipeForm [data-recipe-judge]').forEach((el) =>
     el.addEventListener('change', () => { pState.recipe.judge[el.dataset.recipeJudge] = el.checked })
@@ -512,8 +492,8 @@ function validateRecipeClient() {
     const tm = r.inputs.tokens.max
     if (!(Number.isInteger(tm) && tm >= 1 && tm <= 8)) errs.push('tokens.max doit être entre 1 et 8.')
   }
-  if (r.inputs && r.inputs.title && !(r.reference && r.reference.texts && r.reference.texts.title))
-    errs.push('Un titre (template) est configuré : renseigne « Titre écrit sur la référence ».')
+  // (titre/slots/template : plus de règles ici — la table de remplacement est écrite par le
+  // backend à la publication, cohérente par construction avec le design et les étapes)
   // cohérence recette ↔ config (clés d'entrée = payloadKey des étapes non-format)
   if (pState.config) {
     const inputKeys = new Set(configInputSteps().map((s) => s.key))
@@ -523,15 +503,9 @@ function validateRecipeClient() {
       const pm = photo && photo.photoPolicy && photo.photoPolicy.people && photo.photoPolicy.people.max
       if (typeof pm === 'number' && r.inputs.tokens.max !== pm)
         errs.push(`tokens.max (${r.inputs.tokens.max}) doit égaler photoPolicy.people.max (${pm}).`)
-      // tokens.from doit pointer vers une étape existante (sinon découpage prénoms cassé à la commande)
+      // tokens.from doit pointer vers une étape existante (défense — syncRecipeTokens auto-répare)
       if (r.inputs.tokens.from && !inputKeys.has(r.inputs.tokens.from))
-        errs.push(`« Prénoms depuis » (${r.inputs.tokens.from}) ne correspond à aucune étape — corrige le mapping.`)
-    }
-    // chaque {champ} du template de titre doit pointer vers une étape existante
-    const tpl = r.inputs && r.inputs.title && r.inputs.title.template
-    if (tpl) {
-      for (const m2 of String(tpl).matchAll(/\{([^{}]+)\}/g))
-        if (!inputKeys.has(m2[1])) errs.push(`Le champ « {${m2[1]}} » du titre ne correspond à aucune étape.`)
+        errs.push(`Le mapping des prénoms (${r.inputs.tokens.from}) ne correspond à aucune étape.`)
     }
   }
   // référence obligatoire
