@@ -140,9 +140,9 @@ const pState = {
 // portrait -> 3:4, paysage -> 4:3, carré -> 1:1 (pas d'image encore = 3:4, le cas nominal poster).
 const recipeAspectFromImage = () =>
   state.orientation === 'landscape' ? '4:3' : state.orientation === 'square' ? '1:1' : '3:4'
+// Fragments avancés relisibles. imageRoles/countLine n'y sont PLUS : structurels, identiques
+// pour tous les produits — imposés en code par le backend à la publication.
 const RECIPE_ADVANCED = [
-  { key: 'imageRoles', label: 'Rôles des images (image 1 = photo, image 2 = référence)' },
-  { key: 'countLine', label: 'Ligne de comptage ({n}, {tokens})' },
   { key: 'replaceTitle', label: 'Remplacement du titre ({from} → {to})' },
   { key: 'addExtra', label: 'Ajouter une personne ({to})' },
   { key: 'removeExtra', label: 'Retirer une personne ({from})' },
@@ -1056,12 +1056,95 @@ async function suggestDefaultCollection() {
   refreshAction()
 }
 
+/* ---------- Analyse du design : le prompt s'écrit tout seul (relecture seule) ---------- */
+// À CHAQUE nouveau design au bon format, le backend regarde l'image et écrit les fragments de
+// prompt (style, typographie du titre, séparateurs des légendes…). Walid ne fait que relire.
+const pAnalysis = { inflight: false, doneFor: null } // doneFor = design déjà analysé (ou acté en échec)
+async function callAnalyzeDesignJob(body) {
+  let startRes, startData
+  try {
+    ;({ res: startRes, data: startData } = await fetchJsonT(
+      API + '/api/analyze-design',
+      { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(body) },
+      90000
+    ))
+  } catch (e) {
+    throw new Error(e.name === 'AbortError' ? 'Le service met trop de temps à démarrer.' : 'Connexion au serveur impossible.')
+  }
+  if (startRes.status === 401) throw new Error('Session expirée — reconnecte-toi.')
+  const jobId = startData.data && startData.data.jobId
+  if (!startRes.ok || !startData.success || !jobId) {
+    throw new Error(startData.message || startData.error || 'Impossible de démarrer (' + startRes.status + ')')
+  }
+  const startedAt = Date.now()
+  const MAX_MS = 5 * 60 * 1000
+  let netErrors = 0
+  while (true) {
+    if (Date.now() - startedAt > MAX_MS) throw new Error("L'analyse a expiré. Réessaye.")
+    await sleep(3000)
+    let res, data
+    try {
+      ;({ res, data } = await fetchJsonT(
+        API + '/api/analyze-design/result?id=' + encodeURIComponent(jobId),
+        { headers: { Accept: 'application/json' } },
+        20000
+      ))
+    } catch (e) {
+      if (++netErrors > 6) throw new Error("Connexion interrompue pendant l'analyse.")
+      continue
+    }
+    netErrors = 0
+    if (res.status === 404 || data.status === 'not_found') throw new Error("Session d'analyse expirée. Relance.")
+    if (data.status === 'error') throw new Error(data.message || "Échec de l'analyse du design.")
+    if (data.status === 'done' && data.data && data.data.prompts) return data.data.prompts
+  }
+}
+// Déclencheur : appelé par refreshActionPersonalized (qui court après chaque upload/retaillage).
+function maybeAnalyzeDesign() {
+  if (!state.imageDataUrl || state.needsResize) return
+  if (pAnalysis.inflight || pAnalysis.doneFor === state.imageDataUrl) return
+  runDesignAnalysis()
+}
+async function runDesignAnalysis() {
+  const design = state.imageDataUrl
+  pAnalysis.inflight = true
+  refreshAction() // la porte de publication affiche « écriture du prompt… »
+  try {
+    const steps = ((pState.config && pState.config.steps) || [])
+      .filter((s) => s.type !== 'format' && s.type !== 'photo')
+      .map((s) => ({ payloadKey: s.payloadKey || s.name, type: s.type, titleFr: t(s.title, 'fr') }))
+    const prompts = await callAnalyzeDesignJob({ artwork: design, steps })
+    // design changé pendant l'analyse -> résultat périmé, le prochain refresh relancera
+    if (state.imageDataUrl !== design) return
+    pAnalysis.doneFor = design
+    if (pState.recipe) {
+      pState.recipe.prompt = pState.recipe.prompt || {}
+      pState.recipe.prompt.base = prompts.base
+      for (const key of ['perPerson', 'replaceTitle', 'addExtra', 'removeExtra']) {
+        if (prompts[key]) pState.recipe.prompt[key] = prompts[key]
+        else delete pState.recipe.prompt[key]
+      }
+      // pas de re-render si Walid tape dans la carte 4 (les valeurs y sont au prochain rendu)
+      if (!document.activeElement || !document.activeElement.closest('#recipeForm')) renderRecipeForm()
+    }
+    toast('Prompt écrit depuis votre design ✓ — relis la carte 4 si tu veux', 'ok')
+  } catch (e) {
+    // échec ACTÉ pour ce design (pas de boucle de relance) : les valeurs actuelles restent
+    pAnalysis.doneFor = design
+    toast('Analyse du design : ' + e.message + ' — prompt actuel conservé, relis la carte 4.', 'err')
+  } finally {
+    pAnalysis.inflight = false
+    refreshAction()
+  }
+}
+
 /* ---------- Porte de publication + barre d'action ---------- */
 function personalizedPublishGate() {
   const missing = []
   if (!pState.config) missing.push('config (choisir un preset)')
   else if (!validatePersonalizedConfig().ok) missing.push('config invalide')
   if (!pState.recipe || validateRecipeClient().length) missing.push('recette')
+  if (pAnalysis.inflight) missing.push('écriture du prompt depuis votre design…')
   if (!state.collection) missing.push('collection')
   if (!state.results.length) missing.push('≥1 rendu')
   return { ok: missing.length === 0, hint: missing.length ? 'Manque : ' + missing.join(' · ') : 'Prêt à publier' }
@@ -1074,6 +1157,7 @@ function refreshActionPersonalized() {
     pState.recipe.aspect = recipeAspectFromImage()
     if (!document.activeElement || !document.activeElement.closest('#recipeForm')) renderRecipeForm()
   }
+  maybeAnalyzeDesign() // nouveau design au bon format -> le prompt s'écrit tout seul
   if (state.needsResize) { info.textContent = "⚠️ Retaille l'image au bon format pour publier"; btn.disabled = true; return }
   const gate = personalizedPublishGate()
   info.textContent = gate.hint
