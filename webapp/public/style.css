@@ -262,6 +262,7 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 }
 .action-info{flex:1;font-size:14px;color:var(--muted)}
 .actionbar .primary-btn{width:auto;flex:0 0 auto}
+.actionbar .ghost-btn{width:auto;flex:0 0 auto;margin-top:0} /* « Poster plus tard » (étape jumeau) */
 
 /* ---- lightbox ---- */
 .lightbox{position:fixed;inset:0;z-index:50;background:rgba(28,32,36,.88);display:grid;place-items:center;padding:var(--s4);animation:fade var(--dur-ui) var(--ease-out)}
