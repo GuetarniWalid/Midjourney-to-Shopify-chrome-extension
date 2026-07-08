@@ -2544,7 +2544,8 @@ async function maybeStartJumeau(toileId) {
     netError = false
   try {
     const { data } = await fetchJsonT(
-      `${API}/api/bulk-posters/collection-map?collectionId=${encodeURIComponent(toileCollection.id)}`,
+      `${API}/api/bulk-posters/collection-map?collectionId=${encodeURIComponent(toileCollection.id)}` +
+        `&collectionTitle=${encodeURIComponent(toileCollection.title || '')}`,
       {},
       20000
     )
