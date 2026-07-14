@@ -2736,9 +2736,7 @@ async function finalizeJumeau(toileId, posterId, ratio) {
     ))
     fd = fd || {}
   } catch {
-    throw new Error(
-      'Finalisation interrompue — le poster sera terminé au prochain lancement des posters en masse.'
-    )
+    throw new Error('Finalisation interrompue — le poster se terminera tout seul dans l’heure.')
   }
   if (fd.published) {
     progress.done('Poster publié ✓ — toile et poster liés', fd.link)
@@ -2746,11 +2744,12 @@ async function finalizeJumeau(toileId, posterId, ratio) {
     return
   }
   if (fd.pending) {
-    // Variantes pas encore complètes (webhook lent / cap quotidien). Rien n'est perdu : le brouillon
-    // est gardé et sera terminé au prochain lancement des posters en masse. Pas de cron automatique.
+    // Variantes pas encore complètes (webhook lent, raté, ou cap quotidien). Rien n'est perdu : le
+    // brouillon est gardé, et le cron backend RepairPendingPosters (toutes les heures) recrée les
+    // variantes manquantes puis le publie tout seul. Aucune action du owner.
     progress.done('⏳ Poster créé en brouillon')
     $('#progressMsg').textContent =
-      'Ses variantes ne sont pas toutes prêtes : il sera terminé au prochain lancement des posters en masse (rien à refaire maintenant).'
+      'Ses variantes ne sont pas toutes prêtes : il se publiera tout seul dès qu’elles le seront, dans l’heure. Rien à faire.'
     exitJumeau(false)
     return
   }
@@ -2758,7 +2757,7 @@ async function finalizeJumeau(toileId, posterId, ratio) {
     throw new Error('Le brouillon du poster a disparu — la toile est revenue dans la liste des posters à faire.')
   }
   throw new Error(
-    fd.message || 'Finalisation du poster impossible — réessaie depuis la page Posters en masse.'
+    fd.message || 'Finalisation du poster impossible — il se terminera tout seul dans l’heure.'
   )
 }
 
