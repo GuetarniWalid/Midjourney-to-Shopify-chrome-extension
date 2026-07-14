@@ -136,6 +136,32 @@ function ensureConfig(config) {
     throw new Error('BACKEND_BASE non configuré sur le moteur de rendu')
   }
 }
+// Toute réponse de l'API Adonis porte un champ `success` — c'est elle, le marqueur. Le content-type ne
+// prouve RIEN : le storefront Shopify (www.myselfmonart.com), qui répond 404 à tout /api/*, négocie le
+// contenu et renvoie donc, sur notre `Accept: application/json`, un 404 au corps VIDE mais typé
+// application/json. Sans ce garde-fou le corps vide donnait `{}` et l'erreur remontait en
+// « backend /path HTTP 404 » — un message qui n'accuse jamais l'URL de base, le vrai coupable.
+function parseApiResponse(config, path, r, text) {
+  let data
+  try { data = JSON.parse(text) } catch { data = null }
+  // Quelqu'un d'identifiable a répondu si le corps porte `success` (nos réponses) ou une erreur
+  // structurée d'Adonis (`message`/`error`, ex. E_ROUTE_NOT_FOUND) : on la laisse remonter telle
+  // quelle — elle dit déjà la vérité, et l'écraser par un soupçon sur l'URL serait un contresens.
+  if (data && typeof data === 'object' && ('success' in data || 'message' in data || 'error' in data)) return data
+  // Sinon personne d'identifiable n'a parlé (corps vide, HTML, JSON quelconque) → la base est en cause.
+  // On n'affirme que ce qui est prouvé (l'en-tête x-shopify signe le storefront) ; sinon on cite le
+  // corps reçu et on désigne BACKEND_BASE comme premier suspect, sans exclure un backend en panne.
+  const isShopify = [...r.headers.keys()].some((h) => h.toLowerCase().startsWith('x-shopify'))
+  const excerpt = text.trim().slice(0, 120).replace(/\s+/g, ' ')
+  throw new Error(
+    isShopify
+      ? `BACKEND_BASE=${config.backendBase} est le storefront Shopify, pas l'API : ${path} → HTTP ${r.status}. ` +
+        `Attendu le backend Adonis : https://backend.myselfmonart.com`
+      : `BACKEND_BASE=${config.backendBase} n'a pas répondu comme l'API : ${path} → HTTP ${r.status}, ` +
+        `corps « ${excerpt || '(vide)'} ». Vérifie l'URL (attendu https://backend.myselfmonart.com) ` +
+        `ou l'état du backend.`
+  )
+}
 async function backendPost(config, path, body) {
   ensureConfig(config)
   const r = await fetch(config.backendBase + path, {
@@ -143,17 +169,35 @@ async function backendPost(config, path, body) {
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify(body),
   })
-  const data = await r.json().catch(() => ({}))
+  const data = parseApiResponse(config, path, r, await r.text())
   if (!r.ok || data.success === false) {
     throw new Error(data.message || data.error || `backend ${path} HTTP ${r.status}`)
   }
   return data
 }
-async function backendGet(config, path) {
+// `opts` sert à la sonde de démarrage (timeout). Pas de timeout par défaut : /candidates liste tout le
+// catalogue et est légitimement lent — le couper ferait plus de dégâts que de bien.
+async function backendGet(config, path, opts = {}) {
   ensureConfig(config)
-  const r = await fetch(config.backendBase + path, { headers: { Accept: 'application/json' } })
-  const data = await r.json().catch(() => ({}))
+  const r = await fetch(config.backendBase + path, { headers: { Accept: 'application/json' }, ...opts })
+  const data = parseApiResponse(config, path, r, await r.text())
   return { status: r.status, ok: r.ok, data }
+}
+
+// Sonde de démarrage (server.js) : /api/bulk-posters/status est instantané et sans effet de bord
+// (candidates, lui, liste tout le catalogue → lent). Renvoie le motif si la base est suspecte.
+async function checkBackendBase(backendBase) {
+  try {
+    await backendGet({ backendBase }, '/api/bulk-posters/status?productId=0', { signal: AbortSignal.timeout(8000) })
+    return { ok: true }
+  } catch (e) {
+    // parseApiResponse nomme déjà BACKEND_BASE ; une panne réseau, elle, remonte un « fetch failed » nu
+    // qui n'apprend rien — on y recolle l'URL, seule information utile pour corriger.
+    const reason = e.message.includes(backendBase)
+      ? e.message
+      : `BACKEND_BASE=${backendBase} injoignable (${e.message})`
+    return { ok: false, reason }
+  }
 }
 
 /* ---------- attend que le brouillon ait ses N variantes (webhook async) ---------- */
@@ -406,4 +450,4 @@ function registerBulkPostersRoutes(app, deps) {
   })
 }
 
-module.exports = { registerBulkPostersRoutes }
+module.exports = { registerBulkPostersRoutes, checkBackendBase }

@@ -18,7 +18,8 @@ jeton de service et parle au backend. Pour lire le texte source des toiles, util
   paysage). Le mode COPIE n'utilise **aucun décor IA** (zéro Gemini) : seuls les favoris Photopea.
 - (Aucun secret/token à configurer : les endpoints `/api/bulk-posters/*` ne sont pas authentifiés,
   comme le bouton « publier ». `BACKEND_BASE` n'est à poser dans `webapp/.env` que si le backend
-  n'est pas la prod `https://www.myselfmonart.com`.)
+  n'est pas la prod `https://backend.myselfmonart.com` — attention, l'API n'est **pas** sur
+  `www.myselfmonart.com`, qui est le storefront Shopify et répond 404 à tout `/api/*`.)
 
 ## 1. Paramètres du run (donnés par le owner)
 - `ratio` : `portrait` ou `landscape` (un seul à la fois).

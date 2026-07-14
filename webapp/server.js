@@ -9,14 +9,16 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { PhotopeaEngine } = require('./photopea-engine');
-const { registerBulkPostersRoutes } = require('./bulk-posters-render');
+const { registerBulkPostersRoutes, checkBackendBase } = require('./bulk-posters-render');
 
 // ---- Config (via variables d'environnement) ----
 const PORT = process.env.PORT || 4000;
 const MOCKUPS_PATH = process.env.MOCKUPS_PATH || String.raw`C:\Users\gueta\Documents\MyselfMonArt - Mockups (templates PSD)`;
-// Batch « posters en masse » (pivot COPIE) : base du backend Adonis. Les endpoints /api/bulk-posters/*
+// Batch « posters en masse » (pivot COPIE) : base de l'API Adonis. Les endpoints /api/bulk-posters/*
 // ne sont pas authentifiés (comme /publish) → aucun secret à configurer. Surchargeable via BACKEND_BASE.
-const BACKEND_BASE = (process.env.BACKEND_BASE || 'https://www.myselfmonart.com').replace(/\/$/, '');
+// L'API est bien sur backend.myselfmonart.com : www.myselfmonart.com est le storefront Shopify, qui
+// répond 404 à tout /api/*. (Le défaut pointait dessus par erreur jusqu'au 14/07/2026.)
+const BACKEND_BASE = (process.env.BACKEND_BASE || 'https://backend.myselfmonart.com').replace(/\/$/, '');
 const UPLOADS = path.join(__dirname, 'uploads');
 fs.mkdirSync(UPLOADS, { recursive: true });
 // Templates sauvegardés "pour toujours" : favoris Photopea (références PSD) + décors IA vierges (fichiers image).
@@ -437,8 +439,17 @@ registerBulkPostersRoutes(app, {
 });
 
 // ---- Boot ----
+// Sonde BACKEND_BASE au démarrage : un simple avertissement, jamais un arrêt — le studio (scan des
+// mockups, rendus Photopea, uploads) n'a pas besoin du backend et doit démarrer même s'il est down.
+async function warnIfBackendLooksWrong() {
+  const { ok, reason } = await checkBackendBase(BACKEND_BASE);
+  if (ok) return;
+  console.warn(`\n  [backend] ⚠️  ${reason}\n            Les « posters en masse » échoueront tant que ce n'est pas corrigé.\n`);
+}
+
 (async () => {
   const server = app.listen(PORT, () => console.log(`\n  Moteur de rendu MyselfMonArt → http://localhost:${PORT}\n  Mockups: ${MOCKUPS_PATH}\n`));
+  warnIfBackendLooksWrong(); // volontairement non attendu : ne retarde pas le démarrage
   // /api/bulk-posters/run-one est long (plusieurs rendus Photopea + poll des variantes jusqu'à 120s) :
   // on relève le timeout de requête bien au-dessus du défaut Node (5 min) pour ne pas couper l'agent.
   server.requestTimeout = 600000; // 10 min
