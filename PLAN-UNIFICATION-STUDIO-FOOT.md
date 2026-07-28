@@ -1151,3 +1151,53 @@ ressort de ce chantier — il agrandit lui-même les images depuis l'admin avec 
 Le besoin était : *le client choisit 90x120, voit son rendu, et commande comme pour les autres
 tailles*. C'est fait et vérifié. Le gabarit allégé du 60×80 est CONSERVÉ (décision du propriétaire,
 28/07) : même détail réel, serveur deux fois moins sollicité.
+
+---
+
+## 12. Poster famille — la preuve du « tout par metafield » — 28/07/2026
+
+**Demande :** l'écran client n'avait pas d'étape photo, donc impossible de produire le dessin.
+**Contrainte posée par le propriétaire :** que ce soit réparable en éditant SEULEMENT le metafield.
+
+**Tenu.** Deux metafields édités, zéro ligne de code applicatif pour ce produit : l'étape photo
+apparaît, la génération est active, la politique photo est « groupe, 1 à 6 personnes, aucun angle
+imposé ». Le serveur, lui, acceptait DÉJÀ une création famille avec photo — c'est l'écran qui ne la
+demandait pas.
+
+**Le piège :** la config portait `generation.enabled:false`. Dans ce mode le studio n'appelle jamais
+l'API — une case « votre photo » aurait affiché un champ dont le fichier ne partait NULLE PART. Le
+client aurait cru l'envoyer. Il fallait donc DEUX changements, pas un.
+
+### Le prompt : la photo commande la pose
+Avant, le dessin sortait toujours **de dos, en marchant, main dans la main**, quelle que soit la
+photo — c'était écrit en dur. Désormais la référence ne donne que la MANIÈRE DE DESSINER ; la photo
+donne orientation, postures, contacts, ordre, tailles, âges, cheveux, silhouettes.
+Réécriture par 3 rédacteurs indépendants + 9 critiques adverses ; prompt assemblé rejoué pour 1, 2,
+4 et 6 prénoms (aucun repère en clair) ; validé par le vrai analyseur avant d'être posé.
+
+**Les visages ont demandé trois essais** — et la leçon est réutilisable : une consigne QUALITATIVE ne
+tient pas. « Suggéré » a été lu comme « permis » (visages fouillés), « vide » comme « rien »
+(aucun visage). Ce qui a marché est une consigne **COMPTABLE** : « au plus TROIS marques : deux yeux
+fermés et une bouche ».
+
+### Le défaut trouvé en vérifiant : personne ne regardait la couleur
+Sur une création, **DEUX candidats sur trois** sont sortis coloriés — et un colorié a été classé
+PREMIER. Le prompt l'interdit trois fois. Le juge lit des textes et compte des figures ; la couleur
+ne le regardait pas. Sur un produit vendu « dessin au trait noir sur blanc », l'image serait partie
+chez le client.
+
+Corrigé par une **mesure**, pas par une question à l'IA : « est-ce en couleur ? » se calcule
+exactement. Fonction pure sur les pixels (`app/Services/CustomArt/monochrome.ts`), déclarée par la
+recette (`judge.monochrome`, spread conditionnel → le foot, qui est en couleur, n'hérite de rien).
+Seuil établi sur les candidats RÉELS : noir et blanc **0,000 %**, coloriés **11,2 %** et **11,4 %** —
+rien entre les deux. Protocole parent↔enfant du juge incrémenté à **4** : un enfant en retard
+refuse au lieu d'ignorer le contrôle en silence.
+
+### Répercussion sur les FUTURS produits (le seul code touché)
+`app/Services/RecipeDirector/index.ts` contenait l'ancien prompt comme **exemple imité** par l'IA qui
+rédige les recettes des nouveaux produits personnalisés : chaque nouveau produit héritait du « de
+dos ». Corrigé, ainsi que le préréglage du Publisher.
+
+### Reste à faire côté propriétaire
+La description du produit promet encore « réalisée à la demande par notre studio **après votre
+commande** » — le client voit désormais son poster AVANT d'acheter.
