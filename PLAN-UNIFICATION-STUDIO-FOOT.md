@@ -1010,3 +1010,53 @@ docker logs --since 2m myselfmonart_dashboard-app-1 2>&1 | grep kill-switch
 ### Ce qui reste, et ce qui n'est plus un risque
 La bascule du produit réel (`10528685621595`) est désormais **réversible en une minute et
 prouvée**. Il ne reste plus qu'une décision du propriétaire : la déclencher.
+
+---
+
+## 10. BASCULE FAITE — 28/07/2026, 08:17 UTC
+
+`node ace studio:post-foot-recipe gid://shopify/Product/10528685621595 --execute` →
+`studio.references` (30 maillots) puis `studio.recipe` posés sur le **produit réel**. Le poster foot
+« joueur de légende » ne passe plus par le chemin codé en dur.
+
+### Contrôles avant bascule (tous passés)
+| Contrôle | Résultat |
+|---|---|
+| Recette/références absentes avant | ✅ état de départ confirmé |
+| Écran RÉELLEMENT servi aux clients envoie `teamSlug` | ✅ vérifié dans l'asset minifié en ligne |
+| Consentement envoyé automatiquement | ✅ présent dans l'asset en ligne |
+| Les 15 équipes proposées existent toutes dans la recette | ✅ 15/15, aucun écart |
+| Formats 75x100 / 90x120 | ✅ **déjà** en erreur AVANT la bascule (voir ci-dessous) |
+| Voie de retour | ✅ essayée en production (§9) |
+
+⚠️ **PIÈGE DE MÉTHODE ÉVITÉ DE JUSTESSE.** La première vérification de l'écran en ligne a répondu
+« NON, `teamSlug` absent » — et c'était FAUX : l'asset servi est **minifié**, je cherchais la chaîne
+non minifiée `fd.append('teamSlug'` (apostrophes simples) alors que le fichier livré contient
+`fd.append("teamSlug",…)`. Sur la foi de ce faux négatif, on aurait pu croire la bascule impossible.
+**Toujours inspecter les occurrences réelles, jamais se fier à une recherche de chaîne exacte sur un
+fichier minifié.**
+
+### Découverte annexe, INDÉPENDANTE de ce chantier
+Le produit affiche **4 formats** (30x40, 60x80, 75x100, 90x120) mais toute la chaîne n'en gère que
+**2** : le validateur (`schema.enum(['30x40','60x80'])`), le type `CustomArtFormat` et les gabarits
+d'impression `PRINT_SPECS`. Vérifié empiriquement AVANT la bascule : une création en 75x100 renvoyait
+déjà `422 — Variante inconnue`. La bascule ne change donc rien, **mais deux des quatre formats vendus
+sont inutilisables dans le studio**. À traiter séparément.
+
+### Vérification après bascule
+- Cache recette : le routage a basculé **~5 min** après la pose, comme annoncé. Pendant cet
+  intervalle, les créations sont parties sur l'ancien chemin — sans incident, les deux coexistent.
+- Requête à la forme EXACTE d'un client (`teamId` + `teamSlug` + prénom + numéro + photo, variante
+  30x40 sans cadre) : elle traverse consentement → validation des champs par la recette → photo, et
+  n'est arrêtée que par le plafond d'essais quotidien. **Le parcours client est validé de bout en
+  bout, à coût nul.**
+- Génération réelle sur le produit réel : `455c48ae` → maillot Équipe de France, « LUCAS » au-dessus
+  du « 7 » en typographie dorée, aucun blason dans le dos, enfant préservé.
+- Étiquetage de commande : `LUCAS / 7 / Équipe de France / 30x40 / none`.
+- Journaux depuis la bascule : **aucune erreur imputable**. (Un `judge KO` figure dans la fenêtre : il
+  concerne le produit de TEST, et le job est sorti `ready` — l'isolation du juge a fait son travail.)
+
+### Retour arrière, si besoin
+Mode d'emploi complet au §9. En une ligne :
+`echo 'STUDIO_GENERIC_DISABLE_PRODUCTS=10528685621595' >> .env` puis recréer le conteneur `app`.
+Effet immédiat, ~10 s d'interruption.
