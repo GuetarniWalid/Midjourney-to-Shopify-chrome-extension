@@ -1137,3 +1137,17 @@ corriger l'estimation de coût (×1,87 de jetons image).
   falsifiable** : remettre le mensonge du 60×80 le fait échouer, retirer la reconnaissance du
   90×120 aussi. 244 assertions vertes au total.
 - Aucune migration : la colonne `format` est un texte, pas une liste figée.
+
+### Vérification depuis l'ÉCRAN CLIENT (et pas seulement l'API) — 28/07/2026
+Inspection de la vraie page produit en ligne :
+- l'étape « Format » du studio propose bien **les quatre tailles** (30x40, 60x80, 75x100, 90x120) ;
+- choisir 90x120 résout la bonne variante (`53552209658203`) et l'écran émet
+  `format=90x120`, `frame=none`, `variantId=53552209658203` ;
+- ce même identifiant de variante est celui que le backend accepte désormais (contrôlé en
+  production) et avec lequel une création est allée jusqu'au bout (`9600618c`, `format=90x120`).
+
+**Périmètre acté avec le propriétaire :** la qualité du fichier envoyé à l'imprimeur n'est PAS du
+ressort de ce chantier — il agrandit lui-même les images depuis l'admin avec ses propres logiciels.
+Le besoin était : *le client choisit 90x120, voit son rendu, et commande comme pour les autres
+tailles*. C'est fait et vérifié. Le gabarit allégé du 60×80 est CONSERVÉ (décision du propriétaire,
+28/07) : même détail réel, serveur deux fois moins sollicité.
