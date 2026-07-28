@@ -1201,3 +1201,60 @@ dos ». Corrigé, ainsi que le préréglage du Publisher.
 ### Reste à faire côté propriétaire
 La description du produit promet encore « réalisée à la demande par notre studio **après votre
 commande** » — le client voit désormais son poster AVANT d'acheter.
+
+---
+
+## 12. Poster famille : la photo commande la pose — 28/07/2026
+
+**Tout par metafield, zéro ligne de code produit.** C'était la démonstration voulue par le
+propriétaire, et elle tient : `studio.config` (étape photo + génération réactivée) et `studio.recipe`
+(nouveau prompt) posés directement sur la fiche produit `10565374247259`.
+
+**Le piège du départ :** la config portait `generation.enabled: false`. Dans ce mode, une case
+« votre photo » n'aurait mené nulle part — le fichier serait resté dans le navigateur et jeté. Il
+fallait DEUX changements, pas un.
+
+**Le prompt.** La référence ne donne plus que la manière de dessiner (trait, contour, lettrage,
+cœurs, mise en page). La photo donne l'orientation, les postures, les contacts, l'ordre, les tailles,
+les âges, les silhouettes. Validé sur trois cas : famille de face, famille assise, parent portant un
+enfant — l'ancien prompt sortait systématiquement « de dos, en marchant, main dans la main ».
+
+**Trois itérations sur les visages, arbitrées à l'œil par le propriétaire :** trop dessinés →
+complètement vides → minimalistes. Version retenue : deux yeux fermés + un sourire ouvert chaleureux,
+rien entre les deux.
+
+### Ce qui a été appris sur la rédaction des prompts (voir mémoire `ecrire-un-prompt-image`)
+- **Interdire ne marche pas ; décrire le vide, si.** « no nose » → un nez sur 5 visages sur 7.
+  « entre les yeux et la bouche, c'est blanc » → zéro nez.
+- **« AT MOST » autorise ZÉRO** → un enfant sans yeux. Borner par le bas ET par le haut.
+- **Compter ce qu'on veut vraiment** : compter des traits interdisait le sourire ouvert ; compter des
+  ÉLÉMENTS le permet sans rien perdre.
+
+### Contrôle de couleur — nouveau, déclaré par la recette
+Deux candidats sur trois sortaient coloriés sur un produit vendu « noir sur blanc », et c'est un
+colorié que le juge classait PREMIER : il lit des textes et compte des figures, la couleur ne le
+regardait pas. Ajouté : `judge.monochrome`, une MESURE sur les pixels
+(`app/Services/CustomArt/monochrome.ts`), pas une question posée au modèle. Protocole du juge
+incrémenté à 4. Absent d'une recette qui ne le déclare pas — le foot, en couleur, n'hérite de rien.
+
+⚠️ **Seuil recalé une fois** : posé à 2 % sur deux mesures (0 % et 11 %), il a laissé passer une robe
+jaune à 1,34 %. Recalé à 0,5 % après mesure de 13 candidats réels (propres = 0,000 % ; plus petite
+infraction = 1,338 %). **Un seuil se règle sur la plus petite infraction réelle, jamais sur l'écart
+entre deux extrêmes.**
+
+### Autres corrections du même lot
+- Le prompt exigeait à la fois « capitales » et « casse exacte du client », alors que le juge compare
+  à la casse près : contradiction qui aurait recalé des images en boucle.
+- Aucune chaîne de secours de modèles alors qu'une photo de famille contient des enfants (refus de
+  modération constatés) → chaîne à 3 modèles ajoutée.
+- L'étalon few-shot qui sert à rédiger les recettes des FUTURS produits
+  (`app/Services/RecipeDirector/index.ts`) contenait « FROM BEHIND » : chaque nouveau produit
+  héritait du défaut. Resynchronisé.
+- Politique photo : plus aucun angle jugé (`angles: {}`). Une photo de face est désormais notée
+  `perfect` au lieu de `warn` — vérifié en production. Reste contrôlé : tout le monde en entier.
+
+### Ce qui reste, côté propriétaire
+- L'image d'exemple montre encore une famille de dos (`studio-photo-exemple-famille-bon-dos.jpg`) :
+  visuel à refaire, ou second produit « de face » — qui ne coûterait que deux metafields.
+- La description produit promet encore « réalisée après votre commande » alors que le client voit
+  désormais son poster avant d'acheter.
