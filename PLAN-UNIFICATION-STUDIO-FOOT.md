@@ -1060,3 +1060,80 @@ sont inutilisables dans le studio**. À traiter séparément.
 Mode d'emploi complet au §9. En une ligne :
 `echo 'STUDIO_GENERIC_DISABLE_PRODUCTS=10528685621595' >> .env` puis recréer le conteneur `app`.
 Effet immédiat, ~10 s d'interruption.
+
+---
+
+## 11. Les QUATRE formats — 28/07/2026
+
+### Ce qui n'allait pas
+Le produit vend 30x40, 60x80, 75x100 et 90x120. Le studio n'en gérait que deux : choisir l'une des
+deux grandes tailles renvoyait « Variante inconnue », **sur les deux formats les plus chers**.
+
+**Cause profonde, et pourquoi personne ne l'a vue :** la table qui reconnaît les tailles était un
+simple tableau. Oublier une taille ne provoquait **aucune erreur de compilation**. Elle est
+désormais indexée par le type — ajouter une taille sans la déclarer ne compile plus.
+
+### Le levier que j'avais annoncé était FAUX — vérifié de mes mains
+J'avais dit à l'owner que demander du **2K** au modèle était la solution. **C'est faux, et ça aurait
+cassé l'impression de TOUTES les commandes payées.** L'agrandisseur Real-ESRGAN plafonne à
+2 096 704 pixels **en entrée** ; une image 2K en fait 4 300 800. Message obtenu en le testant
+réellement :
+> `Input image of dimensions (2400, 1792, 3) has a total number of pixels 4300800 greater than the
+> max size that fits in GPU memory on this hardware, 2096704.`
+Résultat s'il était parti : `upscale` échoue → 2 tentatives → chaque commande PAYÉE finit en
+`awaiting_file`. Pas un fichier de mauvaise qualité : **aucun fichier**.
+
+Mesures faites directement sur l'API (`gemini-3.1-flash-image`, aspectRatio 3:4) :
+
+| `imageSize` | sortie | ratio | durée |
+|---|---|---|---|
+| (défaut) | 896×1200 | 0,746667 | 8,3 s |
+| `2K` | 1792×2400 | 0,746667 | 17,0 s |
+| **`4K`** | **3584×4800** | 0,746667 | 35,2 s |
+
+⚠️ Au passage : **le « 3:4 » du modèle n'en est pas un** (0,746667 au lieu de 0,750000). Le
+recadrage `cover` rogne donc déjà ~0,9 mm par bord en 30×40, ~2,6 mm en 90×120. Existant, non traité
+ici.
+
+### Les gabarits : un seul, pour les quatre
+L'information réelle plafonne à **3584 px de large** (896×1200 puis agrandisseur ×4). Fabriquer plus
+grand n'ajoute aucun détail — c'est de l'interpolation, payée en mémoire. Donc **même gabarit
+3543×4724 pour les quatre tailles, seule la densité annoncée change** : 300 / 150 / 120 / 100 dpi,
+exacts au dpi près.
+
+### Deux défauts VIVANTS corrigés au passage (mesurés, pas supposés)
+1. **Le 60×80 mentait à l'imprimeur** : il annonçait 200 dpi alors qu'il n'en avait réellement que
+   152. Depuis le premier jour.
+2. **Il pouvait faire redémarrer l'application en plein travail.** Son gabarit 4724×6299 fait
+   culminer le processus à **~410 Mo** (mesuré), au-delà du seuil de redémarrage du gestionnaire de
+   processus (460 Mo, base applicative comprise). Une commande PAYÉE pouvait donc se figer sans
+   erreur et sans e-mail. Le pic est désormais **constant** quelle que soit la taille commandée.
+
+Et un piège évité : un 90×120 à 200 dpi (7087×9449) demande **776 Mo** — plus que le conteneur
+entier (768 Mo). Mesuré avant d'écrire une ligne.
+
+### Qualité réelle, sans enjoliver
+| format | dpi réel | verdict honnête |
+|---|---|---|
+| 30×40 | 300 | irréprochable |
+| 60×80 | 150 | correct à 1 m |
+| 75×100 | 120 | bon à 1,5 m, mou de près |
+| 90×120 | **100** | plancher du grand format — **à faire valider par Picanova** |
+
+### Le vrai levier de qualité, pour plus tard
+`imageSize: '4K'` **et suppression de l'agrandisseur** : mêmes 3584×4800 en sortie, mais
+**17,2 Mpx de détail VRAI au lieu de 1,07 Mpx extrapolés**. Mesure de fidélité : l'agrandisseur ne
+restitue pas le détail, il en **fabrique** (plus « croustillant » que la réalité, et plus loin d'elle
+qu'un simple bicubic). Bonus : une dépendance payante en moins, ~12 s de moins par commande.
+**Conditions à livrer dans le même lot**, sinon ça dégrade : sérialiser les 3 normalisations sharp
+(sinon 529 Mo de pic dans le processus web), relever `GENERATION_TIMEOUT_MS` (45 s → ~150 s), et
+corriger l'estimation de coût (×1,87 de jetons image).
+
+### Preuves
+- Les **quatre** formats franchissent variante + validation + photo en production (avant, 75x100
+  renvoyait « Variante inconnue »).
+- Génération réelle en **90×120** de bout en bout : `9600618c` → `ready`, `format=90x120/none`.
+- Nouveau test golden **37 assertions**, câblé à la livraison et au pré-commit, **vérifié
+  falsifiable** : remettre le mensonge du 60×80 le fait échouer, retirer la reconnaissance du
+  90×120 aussi. 244 assertions vertes au total.
+- Aucune migration : la colonne `format` est un texte, pas une liste figée.
