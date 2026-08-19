@@ -40,6 +40,18 @@ const PHOTO_GRADES = [
   { key: 'warn', icon: '🟡', fr: 'Accepté' },
   { key: 'reject', icon: '🔴', fr: 'Refusé' },
 ]
+// Angle retenu -> libellé court, affiché SUR la ligne de l'étape photo (c'est le réglage que
+// Walid doit relire en priorité : une photo au mauvais angle rate le tableau).
+const ANGLE_SHORT_FR = { front: 'de face', 'three-quarter': 'de trois-quarts', profile: 'de profil', back: 'de dos' }
+// Politique photo neutre : rien de bloquant, aucun angle imposé. Sert de socle quand une étape
+// photo arrive du catalogue (qui n'en porte pas) — l'analyse du design la remplit ensuite.
+const blankPhotoPolicy = () => ({ subject: 'person', framing: 'full-body', angles: {}, messages: {} })
+// Angle 🟢 d'une étape photo (null si la grille n'en désigne aucun).
+const perfectAngleOf = (step) => {
+  const angles = (step && step.photoPolicy && step.photoPolicy.angles) || {}
+  const hit = Object.entries(angles).find(([, g]) => g === 'perfect')
+  return hit ? hit[0] : null
+}
 
 
 /* ---------- Catalogue d'étapes PRÊTES À L'EMPLOI ----------
@@ -299,9 +311,18 @@ function renderStudioSteps() {
     const cell = document.createElement('div')
     cell.className = 'studio-step'
     cell.dataset.name = step.name
+    // Sur la photo, l'angle exigé est affiché À CÔTÉ du nom : c'est LE réglage qui décide si le
+    // tableau ressemblera au client, et le seul qu'on ne peut pas deviner sans ouvrir l'éditeur.
+    // Sauf quand le titre le dit déjà (« Votre photo de dos ») — répéter n'informe pas.
+    let angle = step.type === 'photo' ? perfectAngleOf(step) : null
+    // (les 4 libellés d'angle sont sans accent : une comparaison en minuscules suffit)
+    if (angle && (t(step.title, 'fr') || '').toLowerCase().includes(ANGLE_SHORT_FR[angle] || ' '))
+      angle = null
     cell.innerHTML =
       `<span class="ss-icon">${meta.icon}</span>` +
-      `<span class="ss-main"><span class="ss-name">${escapeHtml(t(step.title, 'fr') || step.name)}</span></span>` +
+      `<span class="ss-main"><span class="ss-name">${escapeHtml(t(step.title, 'fr') || step.name)}` +
+      (angle ? ` <span class="ss-tag">${escapeHtml(ANGLE_SHORT_FR[angle] || angle)}</span>` : '') +
+      `</span></span>` +
       `<span class="ss-badge ${errs.length ? 'err' : 'ok'}">${errs.length ? '✗ ' + errs.length : '✓'}</span>` +
       `<span class="ss-actions">` +
       (step.type === 'photo' ? `<button class="ss-act ss-edit" title="Régler la photo">✎</button>` : '') +
@@ -376,8 +397,11 @@ function syncRecipeTokens(r) {
     return null
   }
   const photo = steps.find((s) => s.type === 'photo')
-  const pm = photo && photo.photoPolicy && photo.photoPolicy.people && photo.photoPolicy.people.max
-  const max = typeof pm === 'number' ? pm : (r.inputs.tokens && r.inputs.tokens.max) || 6
+  const pol = (photo && photo.photoPolicy) || null
+  const pm = pol && pol.people && pol.people.max
+  // Sujet solo (le design ne montre qu'une figure) : une seule légende a du sens — sans cette
+  // borne, le client pourrait saisir 4 prénoms et le rendu devrait dessiner 4 personnes.
+  const max = typeof pm === 'number' ? pm : pol && pol.subject === 'person' ? 1 : (r.inputs.tokens && r.inputs.tokens.max) || 6
   r.inputs.tokens = { from, split: true, max }
   return r.inputs.tokens
 }
@@ -392,9 +416,6 @@ function renderRecipeForm() {
   r.reference = r.reference || { texts: {} }
   r.reference.texts = r.reference.texts || {}
   r.prompt = r.prompt || {}
-  // Contrôle qualité : TOUJOURS actif (imposé, plus d'UI). Valeurs explicites dans le JSON —
-  // le défaut backend est Boolean(tokens), on ne s'y fie pas.
-  r.judge = { text: true, figureCount: true }
   const P = []
 
   // Moteur : PAS d'UI — mêmes réglages pour tous les produits. Le ratio est déduit de l'image
@@ -405,7 +426,13 @@ function renderRecipeForm() {
   // le juge photo. La table de remplacement des textes (titre écrit sur le design, légendes par
   // sujet, template du titre) est LUE SUR LE DESIGN par le backend à la publication (vision) :
   // plus aucun champ ici — les valeurs du préréglage restent en secours dans le JSON.
-  syncRecipeTokens(r)
+  const tokens = syncRecipeTokens(r)
+
+  // Contrôle qualité : TOUJOURS actif (imposé, plus d'UI) — sauf le comptage de personnages,
+  // qui se règle sur le nombre de légendes attendues. Sans légendes par sujet, le compte
+  // attendu vaut 0 et le contrôle recalerait tous les rendus : il n'a alors pas d'objet.
+  // (Le back retranche la même règle à la publication, sur la table réellement lue du design.)
+  r.judge = { text: true, figureCount: !!tokens }
 
   // Référence de style : seul vrai choix — le design (défaut) ou une autre image.
   P.push('<div class="studio-sub"><p class="studio-sub-title">Référence de style</p>')
@@ -594,10 +621,11 @@ function renderStepEditorBody() {
   wireStepEditorEvents()
 }
 function renderPhotoPolicyEditor(s) {
-  const pol = s.photoPolicy || null
-  if (!pol) {
-    return ''
-  }
+  // Contrôle décoché = aucune règle à régler. Coché sans politique (étape venue du catalogue,
+  // qui n'en porte pas) : on en pose une neutre, sinon la grille d'angles ne s'afficherait
+  // jamais et la case resterait sans effet.
+  if (!s.photoCheck) return ''
+  const pol = s.photoPolicy || (s.photoPolicy = blankPhotoPolicy())
   const angleRows = PHOTO_ANGLES.map((a) => {
     const cur = (pol.angles && pol.angles[a.key]) || 'warn'
     const opts = PHOTO_GRADES.map((g) =>
@@ -1096,14 +1124,104 @@ async function callAnalyzeDesignJob(body) {
     netErrors = 0
     if (res.status === 404 || data.status === 'not_found') throw new Error("Session d'analyse expirée. Relance.")
     if (data.status === 'error') throw new Error(data.message || "Échec de l'analyse du design.")
-    if (data.status === 'done' && data.data && data.data.prompts) return data.data.prompts
+    if (data.status === 'done' && data.data && data.data.prompts) return data.data
   }
 }
 // Déclencheur : appelé par refreshActionPersonalized (qui court après chaque upload/retaillage).
+// Le parcours ET la recette doivent être chargés — le plan RÉÉCRIT les étapes, il n'a rien à
+// réécrire tant que le préréglage n'est pas là (et le résultat serait perdu).
 function maybeAnalyzeDesign() {
   if (!state.imageDataUrl || state.needsResize) return
+  if (!pState.config || !pState.recipe) return
   if (pAnalysis.inflight || pAnalysis.doneFor === state.imageDataUrl) return
   runDesignAnalysis()
+}
+
+/* ---------- Application du plan : le parcours se remplit tout seul ----------
+   Le back a lu le design et renvoie QUELS champs demander + QUELLE photo exiger. On reconstruit
+   les étapes dans cet ordre : photo → champs retenus → format (toujours dernier, contrat moteur).
+   Tout reste éditable ensuite — c'est une proposition, pas un verrou. */
+function applyDesignPlan(plan) {
+  if (!plan || !pState.config) return null
+  const steps = pState.config.steps || []
+  const catalogById = (id) => STEP_CATALOG.find((e) => e.id === id)
+  const fresh = (id) => {
+    const entry = catalogById(id)
+    return entry ? JSON.parse(JSON.stringify(entry.step)) : null
+  }
+  const next = []
+
+  // 1) Étape photo. On REPART de celle en place quand elle existe : elle porte le bloc
+  // `examples` (alt/légende) que la publication a besoin de trouver pour y accrocher les
+  // images d'exemple — une étape neuve du catalogue n'en a pas.
+  let photoStep = null
+  if (plan.photo) {
+    photoStep = steps.find((s) => s.type === 'photo') || fresh('photo')
+    if (photoStep) {
+      const p = plan.photo
+      const pol = photoStep.photoPolicy || (photoStep.photoPolicy = blankPhotoPolicy())
+      pol.subject = p.subject
+      pol.framing = p.framing
+      if (p.subject === 'group' && p.people) pol.people = { min: p.people.min, max: p.people.max }
+      else delete pol.people
+      pol.angles = { ...p.angles }
+      // Messages client : seul le FR est écrit — les 4 autres langues sont (re)générées à la
+      // publication. Garder une vieille traduction serait pire que pas de traduction du tout.
+      pol.messages = pol.messages || {}
+      if (p.rejectFramingFr) pol.messages.reject_framing = { fr: p.rejectFramingFr }
+      else delete pol.messages.reject_framing
+      if (p.warnAngleFr) pol.messages.warn_angle = { fr: p.warnAngleFr }
+      else delete pol.messages.warn_angle
+      // La consigne de prise de vue du thème dérive de faceAngle : elle suit l'angle 🟢.
+      photoStep.faceAngle = perfectAngleOf(photoStep) || 'front'
+      // Contrôle automatique activé : c'est lui qui refuse la photo AVANT une génération payée.
+      photoStep.photoCheck = true
+      photoStep.title = { fr: p.titleFr }
+      photoStep.help = { fr: p.helpFr }
+      next.push(photoStep)
+    }
+  }
+
+  // 2) Champs retenus, dans l'ordre du plan (une étape déjà en place est réutilisée telle quelle).
+  for (const id of plan.fields) {
+    const entry = catalogById(id)
+    if (!entry || entry.step.type === 'photo' || entry.step.type === 'format') continue
+    const existing = steps.find((s) => s.name === entry.step.name)
+    const step = existing || fresh(id)
+    if (step && !next.includes(step)) next.push(step)
+  }
+
+  // 3) Format : toujours en dernier (contrat moteur — prix/variantes).
+  const format = steps.find((s) => s.type === 'format')
+  if (format) next.push(format)
+
+  // Sans étape photo, le consentement n'a plus d'objet (et la config le refuserait autrement).
+  if (!photoStep && pState.config.payload && pState.config.payload.extra)
+    delete pState.config.payload.extra.consent
+  else if (photoStep)
+    pState.config.payload = { ...(pState.config.payload || {}), extra: { ...((pState.config.payload || {}).extra || {}), consent: '1' } }
+
+  // Les exemples photo dérivent du design PRÉCÉDENT : ils ne veulent plus rien dire ici.
+  pState.photoExamples = { good: null, bad: null }
+  pState.config.steps = next
+  pState.previewStepName = next[0] && next[0].name
+  onConfigChanged() // resynchronise aussi les prénoms de la recette (tokens) sur les étapes
+  return photoStep
+}
+// Résumé d'une ligne pour le retour à Walid (règle UX : pas de bandeau permanent en lecture
+// seule — ce qui compte est visible et éditable dans les cartes 3 et 4).
+function planSummary(plan, photoStep) {
+  const bits = []
+  if (photoStep) {
+    const a = perfectAngleOf(photoStep)
+    bits.push('photo ' + (ANGLE_SHORT_FR[a] || 'libre'))
+  }
+  for (const id of plan.fields) {
+    const entry = STEP_CATALOG.find((e) => e.id === id)
+    if (entry) bits.push(entry.label.toLowerCase())
+  }
+  if (plan.animals && plan.animals.present) bits.push('avec ' + plan.animals.kinds.join(' et '))
+  return bits.join(' · ')
 }
 async function runDesignAnalysis() {
   const design = state.imageDataUrl
@@ -1113,10 +1231,20 @@ async function runDesignAnalysis() {
     const steps = ((pState.config && pState.config.steps) || [])
       .filter((s) => s.type !== 'format' && s.type !== 'photo')
       .map((s) => ({ payloadKey: s.payloadKey || s.name, type: s.type, titleFr: t(s.title, 'fr') }))
-    const prompts = await callAnalyzeDesignJob({ artwork: design, steps })
+    // Vocabulaire FERMÉ : le back ne rédige pas d'étape, il CHOISIT dans ce catalogue — les
+    // étapes y sont déjà écrites et traduites, rien d'inventé ne peut entrer dans la config.
+    const catalog = STEP_CATALOG.filter((e) => e.step.type !== 'photo' && e.step.type !== 'format').map((e) => ({
+      id: e.id,
+      payloadKey: e.step.payloadKey || e.step.name,
+      type: e.step.type,
+      titleFr: e.label,
+    }))
+    const { prompts, plan } = await callAnalyzeDesignJob({ artwork: design, steps, catalog })
     // design changé pendant l'analyse -> résultat périmé, le prochain refresh relancera
     if (state.imageDataUrl !== design) return
     pAnalysis.doneFor = design
+    // Le parcours d'abord (il fixe les champs), le prompt ensuite (il est écrit pour eux).
+    const photoStep = plan ? applyDesignPlan(plan) : null
     if (pState.recipe) {
       pState.recipe.prompt = pState.recipe.prompt || {}
       pState.recipe.prompt.base = prompts.base
@@ -1127,11 +1255,16 @@ async function runDesignAnalysis() {
       // pas de re-render si Walid tape dans la carte 4 (les valeurs y sont au prochain rendu)
       if (!document.activeElement || !document.activeElement.closest('#recipeForm')) renderRecipeForm()
     }
-    toast('Prompt écrit depuis votre design ✓ — relis la carte 4 si tu veux', 'ok')
+    toast(
+      plan
+        ? 'Rempli depuis votre design ✓ — ' + planSummary(plan, photoStep) + ' (tout reste modifiable)'
+        : 'Prompt écrit depuis votre design ✓ — relis la carte 4 si tu veux',
+      'ok'
+    )
   } catch (e) {
     // échec ACTÉ pour ce design (pas de boucle de relance) : les valeurs actuelles restent
     pAnalysis.doneFor = design
-    toast('Analyse du design : ' + e.message + ' — prompt actuel conservé, relis la carte 4.', 'err')
+    toast('Analyse du design : ' + e.message + ' — réglages actuels conservés, relis les cartes 3 et 4.', 'err')
   } finally {
     pAnalysis.inflight = false
     refreshAction()
