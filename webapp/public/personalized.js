@@ -360,6 +360,7 @@ function renderStudioValidation() {
       (items.length > 12 ? `<div>… et ${items.length - 12} autre(s).</div>` : '')
     badge.textContent = `${stepErrs + v.rootErrors.length} erreur(s)`
   }
+  renderAnalysisState() // l'analyse en cours (ou son échec) reprend le badge
 }
 
 /* ---------- Éditeur de recette (studio.recipe) ---------- */
@@ -547,6 +548,7 @@ function renderRecipeValidation() {
     box.innerHTML = `✗ ${errs.length} problème(s) :<ul>${errs.map((e) => `<li>${escapeHtml(e)}</li>`).join('')}</ul>`
     badge.textContent = `${errs.length} problème(s)`
   }
+  renderAnalysisState() // l'analyse en cours (ou son échec) reprend le badge
 }
 // Vérification serveur (validate-personalized) : config + recette + unicité slug.
 async function runServerVerify() {
@@ -1087,8 +1089,35 @@ async function suggestDefaultCollection() {
 /* ---------- Analyse du design : le prompt s'écrit tout seul (relecture seule) ---------- */
 // À CHAQUE nouveau design au bon format, le backend regarde l'image et écrit les fragments de
 // prompt (style, typographie du titre, séparateurs des légendes…). Walid ne fait que relire.
-const pAnalysis = { inflight: false, doneFor: null } // doneFor = design déjà analysé (ou acté en échec)
-async function callAnalyzeDesignJob(body) {
+// doneFor = design déjà analysé (ou acté en échec) ; phase = ce que le serveur fait en ce moment ;
+// failed = dernier essai en échec (affiché de façon PERSISTANTE, avec un bouton réessayer : un
+// toast qui passe pendant qu'on regarde ailleurs, c'est « il ne s'est rien passé »).
+const pAnalysis = { inflight: false, doneFor: null, phase: null, failed: null }
+const ANALYSIS_LABEL = { plan: 'lecture de votre design…', prompt: 'écriture du prompt…' }
+/* État de l'analyse posé sur les DEUX cartes qu'elle remplit (3 et 4) : c'est là que Walid
+   regarde, et elles restaient vides pendant 30 à 60 s. Prioritaire sur les badges de validation
+   (renderStudioValidation / renderRecipeValidation s'effacent tant que ceci parle). */
+function renderAnalysisState() {
+  for (const sel of ['#studioBadge', '#recipeBadge']) {
+    const el = $(sel)
+    if (!el) continue
+    if (pAnalysis.inflight) {
+      el.innerHTML = `<span class="badge-spin"></span>${escapeHtml(ANALYSIS_LABEL[pAnalysis.phase] || ANALYSIS_LABEL.plan)}`
+    } else if (pAnalysis.failed) {
+      el.innerHTML = `<button type="button" class="badge-retry" title="${escapeHtml(pAnalysis.failed)}">↻ Analyse échouée — réessayer</button>`
+      const btn = el.querySelector('.badge-retry')
+      if (btn) btn.addEventListener('click', retryDesignAnalysis)
+    }
+  }
+}
+// L'analyse ne se relance pas toute seule après un échec (pas de boucle de relance sur un
+// service payant) : c'est ce bouton qui la redemande.
+function retryDesignAnalysis() {
+  pAnalysis.failed = null
+  pAnalysis.doneFor = null
+  refreshAction()
+}
+async function callAnalyzeDesignJob(body, onPhase) {
   let startRes, startData
   try {
     ;({ res: startRes, data: startData } = await fetchJsonT(
@@ -1124,6 +1153,7 @@ async function callAnalyzeDesignJob(body) {
     netErrors = 0
     if (res.status === 404 || data.status === 'not_found') throw new Error("Session d'analyse expirée. Relance.")
     if (data.status === 'error') throw new Error(data.message || "Échec de l'analyse du design.")
+    if (data.status === 'pending' && data.phase && onPhase) onPhase(data.phase)
     if (data.status === 'done' && data.data && data.data.prompts) return data.data
   }
 }
@@ -1226,7 +1256,10 @@ function planSummary(plan, photoStep) {
 async function runDesignAnalysis() {
   const design = state.imageDataUrl
   pAnalysis.inflight = true
-  refreshAction() // la porte de publication affiche « écriture du prompt… »
+  pAnalysis.phase = 'plan'
+  pAnalysis.failed = null
+  renderAnalysisState()
+  refreshAction() // la porte de publication reste fermée le temps de l'analyse
   try {
     const steps = ((pState.config && pState.config.steps) || [])
       .filter((s) => s.type !== 'format' && s.type !== 'photo')
@@ -1239,7 +1272,10 @@ async function runDesignAnalysis() {
       type: e.step.type,
       titleFr: e.label,
     }))
-    const { prompts, plan } = await callAnalyzeDesignJob({ artwork: design, steps, catalog })
+    const { prompts, plan } = await callAnalyzeDesignJob({ artwork: design, steps, catalog }, (phase) => {
+      pAnalysis.phase = phase
+      renderAnalysisState()
+    })
     // design changé pendant l'analyse -> résultat périmé, le prochain refresh relancera
     if (state.imageDataUrl !== design) return
     pAnalysis.doneFor = design
@@ -1262,22 +1298,31 @@ async function runDesignAnalysis() {
       'ok'
     )
   } catch (e) {
-    // échec ACTÉ pour ce design (pas de boucle de relance) : les valeurs actuelles restent
+    // échec ACTÉ pour ce design (pas de boucle de relance sur un service payant) : les valeurs
+    // actuelles restent, et l'échec s'AFFICHE sur les cartes avec un bouton réessayer.
     pAnalysis.doneFor = design
-    toast('Analyse du design : ' + e.message + ' — réglages actuels conservés, relis les cartes 3 et 4.', 'err')
+    pAnalysis.failed = e.message
+    toast('Analyse du design : ' + e.message, 'err')
   } finally {
     pAnalysis.inflight = false
+    pAnalysis.phase = null
+    renderAnalysisState()
     refreshAction()
   }
 }
 
 /* ---------- Porte de publication + barre d'action ---------- */
 function personalizedPublishGate() {
+  // Pendant l'analyse, c'est ELLE qu'on annonce (et pas sous « Manque : » — rien ne manque, ça
+  // travaille). Les autres conditions reviendront dès qu'elle rend la main.
+  if (pAnalysis.inflight)
+    return { ok: false, hint: '⏳ ' + (ANALYSIS_LABEL[pAnalysis.phase] || ANALYSIS_LABEL.plan) }
   const missing = []
   if (!pState.config) missing.push('config (choisir un preset)')
   else if (!validatePersonalizedConfig().ok) missing.push('config invalide')
   if (!pState.recipe || validateRecipeClient().length) missing.push('recette')
-  if (pAnalysis.inflight) missing.push('écriture du prompt depuis votre design…')
+  // Un échec d'analyse ne BLOQUE pas (le produit naît en brouillon, et Gemini indisponible ne
+  // doit pas arrêter la boutique) : il s'affiche en gros sur les cartes 3 et 4, avec réessayer.
   if (!state.collection) missing.push('collection')
   if (!state.results.length) missing.push('≥1 rendu')
   return { ok: missing.length === 0, hint: missing.length ? 'Manque : ' + missing.join(' · ') : 'Prêt à publier' }

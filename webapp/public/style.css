@@ -336,6 +336,13 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .studio-step .ss-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .studio-step .ss-name{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .studio-step .ss-sub{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Analyse du design en cours / en échec — posée sur les badges des cartes 3 et 4 (c'est là que
+   le résultat va apparaître, donc là qu'on annonce le travail). */
+.badge-spin{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px;
+  border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+.badge-retry{border:1px solid var(--danger);background:var(--danger-weak);color:var(--danger);
+  font:inherit;font-size:13px;font-weight:600;padding:4px 10px;border-radius:var(--pill);cursor:pointer}
+.badge-retry:hover{background:var(--danger);color:#fff}
 /* Angle de prise de vue exigé, posé à côté du nom de l'étape photo (réglage à relire). */
 .studio-step .ss-tag{display:inline-block;margin-left:6px;padding:2px 8px;border-radius:var(--pill);
   background:var(--accent-weak);color:var(--accent-text);font-size:12px;font-weight:600;vertical-align:middle}
