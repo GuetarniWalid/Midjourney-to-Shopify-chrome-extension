@@ -406,6 +406,22 @@ function syncRecipeTokens(r) {
   r.inputs.tokens = { from, split: true, max }
   return r.inputs.tokens
 }
+// Même auto-réparation pour le TITRE. Le préréglage porte « La famille {familyName} » : si le
+// parcours ne contient plus l'étape citée (l'analyse du design ne la retient pas toujours), le
+// titre est PENDANT et le serveur refuse la publication — « Le champ « {familyName} » du titre ne
+// correspond à aucune étape ». On le retire alors, avec son texte source : DesignTextReader lit le
+// vrai titre SUR LE DESIGN à la publication (titre variable -> template ; titre décoratif fixe
+// comme « Dog Mom » -> écrit tel quel). Les deux partent ENSEMBLE : le contrat de la recette
+// refuse un inputs.title sans reference.texts.title (substitution impossible).
+function syncRecipeTitle(r) {
+  const title = r.inputs && r.inputs.title
+  if (!title || typeof title.template !== 'string') return
+  const keys = new Set(configInputSteps().map((s) => s.key))
+  const used = (title.template.match(/\{([^{}]+)\}/g) || []).map((m) => m.slice(1, -1))
+  if (used.every((k) => keys.has(k))) return // titre fixe (aucun champ) ou champs tous présents
+  delete r.inputs.title
+  if (r.reference && r.reference.texts) delete r.reference.texts.title
+}
 function renderRecipeForm() {
   const wrap = $('#recipeForm')
   const empty = $('#recipeEmpty')
@@ -428,6 +444,7 @@ function renderRecipeForm() {
   // sujet, template du titre) est LUE SUR LE DESIGN par le backend à la publication (vision) :
   // plus aucun champ ici — les valeurs du préréglage restent en secours dans le JSON.
   const tokens = syncRecipeTokens(r)
+  syncRecipeTitle(r)
 
   // Contrôle qualité : TOUJOURS actif (imposé, plus d'UI) — sauf le comptage de personnages,
   // qui se règle sur le nombre de légendes attendues. Sans légendes par sujet, le compte
@@ -503,7 +520,7 @@ function validateRecipeClient() {
   const r = pState.recipe
   if (!r) return ['Recette non chargée.']
   // auto-réparation AVANT contrôle : le mapping des prénoms suit toujours les étapes courantes
-  if (r.inputs) syncRecipeTokens(r)
+  if (r.inputs) { syncRecipeTokens(r); syncRecipeTitle(r) }
   if (!(r.prompt && r.prompt.base && r.prompt.base.trim())) errs.push('prompt.base est obligatoire.')
   const c = r.candidates
   if (!(Number.isInteger(c) && c >= 1 && c <= 4)) errs.push('candidates doit être entre 1 et 4.')
