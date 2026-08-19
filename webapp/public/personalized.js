@@ -192,6 +192,7 @@ function existingI18nMaps(step) {
     'title', 'checkpointLabel', 'label', 'placeholder', 'help', 'cartProperty.label',
     'examples.good.alt', 'examples.bad.alt', 'examples.bad.caption',
     'photoPolicy.messages.warn_angle', 'photoPolicy.messages.reject_framing',
+    'photoPolicy.messages.angle_mismatch',
   ]
   for (const path of consider) {
     const map = getI18nMap(step, path)
@@ -1253,6 +1254,10 @@ function applyDesignPlan(plan) {
       else delete pol.messages.reject_framing
       if (p.warnAngleFr) pol.messages.warn_angle = { fr: p.warnAngleFr }
       else delete pol.messages.warn_angle
+      // Refus d'angle : sans message par produit, le thème sert un générique inadapté
+      // (« une photo de l'arrière de la tête ») sur un poster en pied.
+      if (p.rejectAngleFr) pol.messages.angle_mismatch = { fr: p.rejectAngleFr }
+      else delete pol.messages.angle_mismatch
       // La consigne de prise de vue du thème dérive de faceAngle : elle suit l'angle 🟢.
       photoStep.faceAngle = perfectAngleOf(photoStep) || 'front'
       // Contrôle automatique activé : c'est lui qui refuse la photo AVANT une génération payée.
