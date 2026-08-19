@@ -47,6 +47,16 @@ const ANGLE_SHORT_FR = { front: 'de face', 'three-quarter': 'de trois-quarts', p
 // photo arrive du catalogue (qui n'en porte pas) — l'analyse du design la remplit ensuite.
 const blankPhotoPolicy = () => ({ subject: 'person', framing: 'full-body', angles: {}, messages: {} })
 // Angle 🟢 d'une étape photo (null si la grille n'en désigne aucun).
+// Légende de la BONNE photo telle que le CLIENT la lira en boutique : elle vient du thème
+// (locales fr.default.json, clés photo_caption_*) et suit `faceAngle`. On la recopie ici pour que
+// l'aperçu montre le vrai texte — il affichait le `alt` (invisible en boutique), d'où des
+// légendes qui ne collaient pas à l'angle demandé.
+const THEME_GOOD_CAPTION_FR = {
+  front: 'Photo idéale : visage net, bien éclairé, de face',
+  'three-quarter': 'Photo idéale : visage net, bien éclairé, légèrement de trois-quarts',
+  profile: 'Photo idéale : visage net, bien éclairé, de profil',
+  back: 'Photo idéale : prise de dos, en pied, silhouettes nettes et bien éclairées',
+}
 const perfectAngleOf = (step) => {
   const angles = (step && step.photoPolicy && step.photoPolicy.angles) || {}
   const hit = Object.entries(angles).find(([, g]) => g === 'perfect')
@@ -673,9 +683,9 @@ function renderPhotoExamplesEditor(s) {
   // optionnelle est réécrite en vrai prompt par le backend (comme « salon marocain » -> décor).
   // Le feedback de génération vit SUR le bouton cliqué (libellé + désactivation) : l'overlay
   // scrolle et un spinner placé ailleurs sort du champ de vision -> « il ne se passe rien ».
-  const slot = (kind, src, label, ph) =>
+  const slot = (kind, src, label, ph, extra = '') =>
     `<div class="photo-ex-slot">
-      <label>${label}</label>
+      <label>${label}</label>${extra}
       <img id="sf-ex-${kind}-img" src="${src || ''}" alt="" ${src ? '' : 'style="min-height:90px"'}>
       <input type="text" id="sf-ex-${kind}-wish" class="decor-vibe" maxlength="300" placeholder="${ph}">
       <div class="resize-actions" id="sf-ex-${kind}-idle">
@@ -688,10 +698,19 @@ function renderPhotoExamplesEditor(s) {
       </div>
       <input type="file" accept="image/*" id="sf-ex-${kind}" class="decor-vibe">
     </div>`
+  // Les DEUX légendes affichées au client, à leur place — sous l'image qu'elles décrivent.
+  // Celle de la bonne photo appartient au thème et suit l'angle 🟢 : montrée, non modifiable
+  // (la changer, c'est changer l'angle juste au-dessus). Celle de la mauvaise vient de nous :
+  // écrite par l'analyse du design, et rectifiable ici.
+  const goodCaption = `<p class="sf-help">Texte vu par le client : « ${escapeHtml(
+    THEME_GOOD_CAPTION_FR[s.faceAngle] || THEME_GOOD_CAPTION_FR.front
+  )} » — il suit l'angle 🟢 ci-dessus.</p>`
+  const badCaption = `<input type="text" id="sf-ex-bad-caption" class="decor-vibe" maxlength="160"
+      placeholder="Texte vu par le client" value="${escapeHtml(t(getI18nMap(s, 'examples.bad.caption'), 'fr'))}">`
   return `<div class="studio-sub"><p class="studio-sub-title">Exemples photo</p>
     <div class="photo-ex">
-      ${slot('good', pState.photoExamples.good, 'Bonne photo', 'Consigne (optionnel) — ex. deux personnes vues de dos')}
-      ${slot('bad', pState.photoExamples.bad, 'Photo à éviter', 'Consigne (optionnel) — ex. jambes coupées, photo sombre')}
+      ${slot('good', pState.photoExamples.good, 'Bonne photo', 'Consigne (optionnel) — ex. deux personnes vues de dos', goodCaption)}
+      ${slot('bad', pState.photoExamples.bad, 'Photo à éviter', 'Consigne (optionnel) — ex. jambes coupées, photo sombre', badCaption)}
     </div>
   </div>`
 }
@@ -884,6 +903,16 @@ function collectSimpleFields() {
       const perfect = Object.entries(angles).find(([, g]) => g === 'perfect')
       s.faceAngle = perfect ? perfect[0] : 'front'
     }
+    // Légende de la mauvaise photo (seule des deux qui nous appartienne). Vidée = on retire la
+    // clé : le thème retombe alors sur son texte générique plutôt que d'afficher du blanc.
+    const cap = $('#sf-ex-bad-caption')
+    if (cap) {
+      const v = cap.value.trim()
+      s.examples = s.examples || {}
+      s.examples.bad = s.examples.bad || {}
+      if (v) s.examples.bad.caption = { fr: v }
+      else delete s.examples.bad.caption
+    }
   }
 }
 function saveStepEditor() {
@@ -1064,7 +1093,8 @@ function renderStudioPreview() {
     parts.push(`<div class="sp-field"><div class="sp-fake">📷 Déposez votre photo ici</div></div>`)
     if (good || bad) {
       parts.push('<div class="sp-examples">')
-      if (good) parts.push(`<div class="sp-ex"><img src="${good}" alt=""><span>✅ ${escapeHtml(t(getI18nMap(step, 'examples.good.alt'), lang))}</span></div>`)
+      // Bonne photo : le texte du THÈME, choisi par l'angle (et non le alt, invisible en boutique).
+      if (good) parts.push(`<div class="sp-ex"><img src="${good}" alt=""><span>✅ ${escapeHtml(THEME_GOOD_CAPTION_FR[step.faceAngle] || THEME_GOOD_CAPTION_FR.front)}</span></div>`)
       if (bad) parts.push(`<div class="sp-ex bad"><img src="${bad}" alt=""><span>⛔ ${escapeHtml(t(getI18nMap(step, 'examples.bad.caption'), lang))}</span></div>`)
       parts.push('</div>')
     }
@@ -1225,6 +1255,15 @@ function applyDesignPlan(plan) {
       photoStep.photoCheck = true
       photoStep.title = { fr: p.titleFr }
       photoStep.help = { fr: p.helpFr }
+      // Légendes des exemples. Celle de la MAUVAISE photo est la seule que l'acheteur lit
+      // (celle de la bonne est écrite par le thème d'après l'angle) — et c'était elle qui
+      // restait au préréglage famille (« selfie serré ») sur un design solo.
+      const ex = (photoStep.examples = photoStep.examples || {})
+      ex.good = ex.good || {}
+      ex.bad = ex.bad || {}
+      if (p.badCaptionFr) ex.bad.caption = { fr: p.badCaptionFr }
+      if (p.goodAltFr) ex.good.alt = { fr: p.goodAltFr }
+      if (p.badAltFr) ex.bad.alt = { fr: p.badAltFr }
       next.push(photoStep)
     }
   }
