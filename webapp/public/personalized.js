@@ -156,6 +156,9 @@ const pState = {
   recipeSameAsDesign: true, // le design (carte 1) sert d'image de référence de style
   styleRef: null, // base64 de la référence de style si ≠ design (URL CDN posée au publish P4)
   previewStepName: null,
+  // Animaux lus sur le design par l'analyse (« chien ») : transmis au generateur d'exemples,
+  // sinon il photographie la personne SEULE alors que l'oeuvre montre son animal.
+  planAnimals: [],
   editing: null, // { index, working } pendant l'édition d'une étape
 }
 // Ratio de la recette DÉDUIT de l'image (carte 1), comme partout dans l'app :
@@ -771,6 +774,7 @@ function photoExamplesPolicyOf(step) {
     peopleMax: pol.people && pol.people.max,
     perfectAngle: (perfect && perfect[0]) || step.faceAngle || 'front',
     rejectAngles: rejects,
+    companions: pState.planAnimals,
   }
 }
 // Génère UNE image (bonne OU à éviter) ; la consigne du slot (OPTIONNELLE — vide = tout
@@ -1287,6 +1291,7 @@ function applyDesignPlan(plan) {
   else if (photoStep)
     pState.config.payload = { ...(pState.config.payload || {}), extra: { ...((pState.config.payload || {}).extra || {}), consent: '1' } }
 
+  pState.planAnimals = (plan.animals && plan.animals.kinds) || []
   // Les exemples photo dérivent du design PRÉCÉDENT : ils ne veulent plus rien dire ici.
   pState.photoExamples = { good: null, bad: null }
   pState.config.steps = next
