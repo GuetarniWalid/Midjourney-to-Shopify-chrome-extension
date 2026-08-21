@@ -330,8 +330,8 @@ function renderStudioSteps() {
     // Sauf quand le titre le dit déjà (« Votre photo de dos ») — répéter n'informe pas.
     let angle = step.type === 'photo' ? perfectAngleOf(step) : null
     // (les 4 libellés d'angle sont sans accent : une comparaison en minuscules suffit)
-    if (angle && (t(step.title, 'fr') || '').toLowerCase().includes(ANGLE_SHORT_FR[angle] || ' '))
-      angle = null
+    const angleShort = angle ? ANGLE_SHORT_FR[angle] : null
+    if (angleShort && (t(step.title, 'fr') || '').toLowerCase().includes(angleShort)) angle = null
     cell.innerHTML =
       `<span class="ss-icon">${meta.icon}</span>` +
       `<span class="ss-main"><span class="ss-name">${escapeHtml(t(step.title, 'fr') || step.name)}` +
@@ -623,7 +623,7 @@ async function runServerVerify() {
    rendre — chaque réglage de prompt coûtait donc une publication. Le back emprunte le MÊME chemin
    que la production (textes lus sur le design, fragments imposés, même juge) : ce qu'on voit ici
    est ce que la cliente obtiendra. */
-const pTest = { inflight: false, photo: null }
+const pTest = { inflight: false, photo: null, lastRender: null }
 
 // Champs texte du parcours : ce sont eux qui alimentent le titre et les légendes du dessin.
 const testValueSteps = () =>
@@ -734,16 +734,162 @@ function renderTestResult(r) {
   const warns = (r.warnings || []).length
     ? `<ul class="sf-help">${r.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`
     : ''
+  pTest.lastRender = r.image
   box.innerHTML = `
     <div class="photo-ex-slot"><img src="${r.image}" alt="Rendu d'essai"></div>
     ${verdict}${warns}
+    <div class="resize-actions">
+      <button type="button" class="primary-btn" id="rt-proof">＋ Ajouter la preuve aux visuels</button>
+    </div>
     <button type="button" class="i18n-toggle" id="rt-prompt-toggle">▾ Voir le prompt envoyé</button>
     <div id="rt-prompt" class="hidden"><textarea readonly style="min-height:220px">${escapeHtml(r.prompt)}</textarea></div>`
+  const proof = $('#rt-proof')
+  if (proof) proof.addEventListener('click', addProofToResults)
   const tog = $('#rt-prompt-toggle')
   if (tog) tog.addEventListener('click', () => {
     const hidden = $('#rt-prompt').classList.toggle('hidden')
     tog.textContent = hidden ? '▾ Voir le prompt envoyé' : '▴ Masquer le prompt'
   })
+}
+
+/* ---------- Preuve « avant → après » ----------
+   Un seul visuel qui montre le passage de la photo au tableau : c'est l'argument le plus direct
+   pour un produit personnalisé, et il ne peut pas être générique — il doit montrer CE design.
+   Tout est CALCULÉ (aucune image de gabarit, aucun cadre en dur) pour s'adapter à n'importe quel
+   couple photo/rendu : portrait, paysage, carré, famille, animal. */
+const PROOF = {
+  size: 2000,
+  bg: '#FBF7F2',        // crème de la marque (fond des fiches)
+  mat: '#FFFFFF',       // marie-louise de la photo
+  frame: '#E3D9CE',     // filet chaud autour du rendu
+  ink: '#8A7862',       // flèche — assez sombre pour se lire en vignette de galerie
+}
+
+// Contient `img` dans la boîte (jamais déformé, jamais rogné) et rend sa boîte réelle.
+function proofFit(img, box) {
+  const scale = Math.min(box.w / img.width, box.h / img.height)
+  const w = Math.round(img.width * scale)
+  const h = Math.round(img.height * scale)
+  return { x: Math.round(box.x + (box.w - w) / 2), y: Math.round(box.y + (box.h - h) / 2), w, h }
+}
+
+function proofRoundRect(ctx, x, y, w, h, r) {
+  const rad = Math.min(r, w / 2, h / 2)
+  ctx.beginPath()
+  ctx.moveTo(x + rad, y)
+  ctx.arcTo(x + w, y, x + w, y + h, rad)
+  ctx.arcTo(x + w, y + h, x, y + h, rad)
+  ctx.arcTo(x, y + h, x, y, rad)
+  ctx.arcTo(x, y, x + w, y, rad)
+  ctx.closePath()
+}
+
+const proofLoad = (src) =>
+  new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('image illisible'))
+    img.src = src
+  })
+
+/**
+ * Compose la preuve : photo à gauche, flèche, rendu à droite. Rend un data URL JPEG.
+ *
+ * Les deux visuels reçoivent la MÊME case : à format égal ils sortent de la même taille, et la
+ * lecture devient « la même chose, transformée » plutôt qu'une vignette à côté d'une affiche.
+ * Aucun texte : le visuel part chez des clientes fr/en/de/nl/es, une légende française serait fausse
+ * pour quatre d'entre elles — la flèche se lit dans toutes les langues.
+ */
+async function buildProofImage(photoUrl, renderUrl) {
+  const [photo, render] = await Promise.all([proofLoad(photoUrl), proofLoad(renderUrl)])
+  const S = PROOF.size
+  const c = document.createElement('canvas')
+  c.width = S
+  c.height = S
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = PROOF.bg
+  ctx.fillRect(0, 0, S, S)
+
+  const pad = Math.round(S * 0.055)
+  const gutter = Math.round(S * 0.10) // couloir de la flèche
+  const cellW = Math.round((S - pad * 2 - gutter) / 2)
+  const cellH = S - pad * 2
+  const mat = Math.round(S * 0.010)
+  const bd = Math.round(S * 0.008)
+
+  const pf = proofFit(photo, { x: pad + mat, y: pad + mat, w: cellW - mat * 2, h: cellH - mat * 2 })
+  const rf = proofFit(render, { x: S - pad - cellW + bd, y: pad + bd, w: cellW - bd * 2, h: cellH - bd * 2 })
+
+  // --- photo : marie-louise blanche + ombre douce (elle se lit comme un tirage, pas comme l'œuvre)
+  ctx.save()
+  ctx.shadowColor = 'rgba(60,45,30,0.16)'
+  ctx.shadowBlur = Math.round(S * 0.02)
+  ctx.shadowOffsetY = Math.round(S * 0.006)
+  ctx.fillStyle = PROOF.mat
+  proofRoundRect(ctx, pf.x - mat, pf.y - mat, pf.w + mat * 2, pf.h + mat * 2, Math.round(S * 0.016))
+  ctx.fill()
+  ctx.restore()
+  ctx.save()
+  proofRoundRect(ctx, pf.x, pf.y, pf.w, pf.h, Math.round(S * 0.010))
+  ctx.clip()
+  ctx.drawImage(photo, pf.x, pf.y, pf.w, pf.h)
+  ctx.restore()
+
+  // --- rendu : filet chaud + ombre portée (le « tableau »)
+  ctx.save()
+  ctx.shadowColor = 'rgba(60,45,30,0.20)'
+  ctx.shadowBlur = Math.round(S * 0.028)
+  ctx.shadowOffsetY = Math.round(S * 0.010)
+  ctx.fillStyle = PROOF.frame
+  ctx.fillRect(rf.x - bd, rf.y - bd, rf.w + bd * 2, rf.h + bd * 2)
+  ctx.restore()
+  ctx.drawImage(render, rf.x, rf.y, rf.w, rf.h)
+
+  // --- flèche, sur l'axe commun des deux visuels et à l'échelle de l'image (sinon elle disparaît)
+  const midY = Math.round((pf.y + pf.h / 2 + rf.y + rf.h / 2) / 2)
+  const aw = Math.round(S * 0.068)
+  const ah = Math.round(S * 0.050)
+  const ax = Math.round(pad + cellW + (gutter - aw) / 2)
+  ctx.fillStyle = PROOF.ink
+  ctx.beginPath()
+  ctx.moveTo(ax, midY - ah * 0.20)
+  ctx.lineTo(ax + aw * 0.58, midY - ah * 0.20)
+  ctx.lineTo(ax + aw * 0.58, midY - ah * 0.5)
+  ctx.lineTo(ax + aw, midY)
+  ctx.lineTo(ax + aw * 0.58, midY + ah * 0.5)
+  ctx.lineTo(ax + aw * 0.58, midY + ah * 0.20)
+  ctx.lineTo(ax, midY + ah * 0.20)
+  ctx.closePath()
+  ctx.fill()
+
+  return c.toDataURL('image/jpeg', 0.92)
+}
+
+/** Ajoute la preuve aux visuels publiés (même file que les mockups). */
+async function addProofToResults() {
+  const btn = $('#rt-proof')
+  if (!btn || !pTest.photo || !pTest.lastRender) return
+  btn.disabled = true
+  btn.textContent = 'Composition…'
+  try {
+    const url = await buildProofImage(pTest.photo, pTest.lastRender)
+    state.results.push({
+      id: 'proof' + Date.now() + Math.random().toString(36).slice(2, 5),
+      path: null,
+      url,
+      context: 'Avant / après — de la photo au tableau',
+      label: 'Avant / après',
+    })
+    // PAS de jumeau passe-partout : ce visuel n'est pas une œuvre encadrable, c'est une preuve.
+    renderResults()
+    refreshAction()
+    toast('Preuve ajoutée aux visuels ✓ — réordonnable dans la carte 6', 'ok')
+    btn.textContent = 'Preuve ajoutée ✓'
+  } catch (e) {
+    toast('Composition impossible : ' + e.message, 'err')
+    btn.disabled = false
+    btn.textContent = '＋ Ajouter la preuve aux visuels'
+  }
 }
 
 /* ---------- Éditeur d'étape (overlay) ---------- */
