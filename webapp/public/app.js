@@ -1523,7 +1523,7 @@ function dropTwinFile(pp) {
 // en réinjectant l'œuvre mat-ée. Écrit sur res.pp. Ne re-rend QUE la 2e rangée (renderPpRow) :
 // le rendu normal du haut ne change pas -> n'interrompt pas un éventuel glisser en cours.
 async function generateTwin(res) {
-  if (!ppEligible() || res.kept || !res.psd === !res.decor) return // ni source PSD ni décor IA -> pas de jumeau
+  if (!ppEligible() || res.kept || res.proof || !res.psd === !res.decor) return // ni source PSD ni décor IA -> pas de jumeau
   if (res.pp && res.pp.optedOut) return
   dropTwinFile(res.pp) // filet de sécurité (le re-roll nettoie déjà via rerollTwin)
   res.pp = { busy: true }
@@ -1568,7 +1568,7 @@ async function generateTwin(res) {
 // favoris ni l'UI ; les insertions IA sont longues -> jamais en parallèle).
 let twinQueue = Promise.resolve()
 function queueTwin(res) {
-  if (!ppEligible() || res.kept) return
+  if (!ppEligible() || res.kept || res.proof) return
   twinQueue = twinQueue.then(() => generateTwin(res)).catch(() => {})
 }
 // Re-roll : on supprime le fichier de l'ANCIEN jumeau AVANT d'écraser res.pp (sinon son chemin
@@ -2017,19 +2017,27 @@ function renderResults() {
     empty = $('#resultsEmpty')
   grid.innerHTML = ''
   empty.classList.toggle('hidden', state.results.length > 0)
-  state.results.forEach((res, i) => {
+  // Les preuves « avant -> après » sont affichées EN FIN et ne se glissent pas : la publication les
+  // épingle là (cf. la boucle d'empaquetage), donc une poignée de glisser promettrait un
+  // déplacement sans effet. L'ordre affiché est ainsi celui qui part vraiment.
+  const rows = [...state.results].sort((a, b) => (a.proof ? 1 : 0) - (b.proof ? 1 : 0))
+  rows.forEach((res, i) => {
     const cell = document.createElement('div')
-    cell.className = 'result-cell'
+    cell.className = 'result-cell' + (res.proof ? ' is-proof' : '')
     cell.dataset.id = res.id
     cell.innerHTML =
       `<div class="num">${i + 1}</div>` +
-      (IS_REIMAGE && !res.kept ? '<span class="new-badge">nouveau</span>' : '') +
+      (res.proof
+        ? `<span class="new-badge">${escapeHtml(res.label)}</span>`
+        : IS_REIMAGE && !res.kept
+          ? '<span class="new-badge">nouveau</span>'
+          : '') +
       `<button class="del" title="Supprimer">✕</button><img src="${res.url}" alt="" draggable="false">`
     cell.querySelector('.del').addEventListener('click', (ev) => {
       ev.stopPropagation()
       removeResult(res.id)
     })
-    attachDrag(cell, res, mainDragCtx)
+    if (!res.proof) attachDrag(cell, res, mainDragCtx)
     grid.appendChild(cell)
   })
   renderPpRow()
@@ -2038,7 +2046,10 @@ function renderResults() {
 // rendus courants : on garde l'ordre connu, on ajoute les nouveaux EN FIN, on retire les disparus.
 // Décorrélé de l'ordre des mockups du haut — c'est tout l'objet du drag de la 2e rangée.
 function ppOrderedResults() {
-  const eligible = state.results.filter((r) => !r.kept)
+  // `proof` : l'image « avant -> apres » d'un poster personnalise. Ce n'est pas une mise en
+  // situation encadrable — lui proposer un passe-partout n'a pas de sens, et « Reactiver »
+  // laisserait un spinner sans fin (generateTwin sort tot faute de res.psd/res.decor).
+  const eligible = state.results.filter((r) => !r.kept && !r.proof)
   const byId = new Map(eligible.map((r) => [r.id, r]))
   const order = (state.ppOrder || []).filter((id) => byId.has(id))
   const seen = new Set(order)
@@ -2059,7 +2070,7 @@ function renderPpRow() {
     grid = $('#ppGrid')
   if (!section || !grid) return
   grid.innerHTML = ''
-  const show = ppEligible() && state.results.some((r) => !r.kept)
+  const show = ppEligible() && state.results.some((r) => !r.kept && !r.proof)
   section.classList.toggle('hidden', !show)
   if (!show) return
   ppOrderedResults().forEach((res, i) => grid.appendChild(buildPpCell(res, i + 1)))
@@ -2852,13 +2863,24 @@ $('#publishBtn').addEventListener('click', async () => {
         fr.readAsDataURL(b)
       })
     }
-    for (let i = 0; i < state.results.length; i++) {
-      progress.step(`Préparation des images… (${i + 1}/${state.results.length})`)
-      const res = state.results[i]
+    // Les preuves « avant -> après » sont ÉPINGLÉES EN FIN, quel que soit l'ordre choisi dans la
+    // carte 6 : en 1re position, une image hérite de l'alt et du slug de l'œuvre côté backend, et
+    // devient l'image de carte, le JSON-LD et la LCP de la fiche produit.
+    const snapshot = [...state.results]
+    const ordered = [...snapshot].sort((a, b) => (a.proof ? 1 : 0) - (b.proof ? 1 : 0))
+    for (let i = 0; i < ordered.length; i++) {
+      progress.step(`Préparation des images… (${i + 1}/${ordered.length})`)
+      const res = ordered[i]
       if (IS_REIMAGE && res.kept) {
         imgs.push({ mediaId: res.mediaId, type: 'mockup', clientId: res.id })
       } else {
-        imgs.push({ base64Image: await toB64(res.url), type: 'mockup', mockupContext: res.context, clientId: res.id })
+        imgs.push({
+          base64Image: await toB64(res.url),
+          type: 'mockup',
+          mockupContext: res.context,
+          clientId: res.id,
+          proof: res.proof || undefined, // statut à part : nom de fichier marqué, alt déterministe
+        })
       }
       if (i === 0)
         imgs.push(
@@ -2871,7 +2893,9 @@ $('#publishBtn').addEventListener('click', async () => {
     // (l'œuvre n°2 n'est jamais doublée). Chacun réutilisera l'alt/le filename de son mockup source
     // côté backend (passePartoutOf=clientId, suffixe « passe-partout », zéro IA).
     if (ppEligible()) {
-      const twins = ppOrderedResults().filter((r) => r.pp && r.pp.url && !r.pp.optedOut)
+      const twins = ppOrderedResults().filter(
+        (r) => snapshot.includes(r) && r.pp && r.pp.url && !r.pp.optedOut // même instantané que les mockups
+      )
       for (let i = 0; i < twins.length; i++) {
         const res = twins[i]
         progress.step(`Préparation des passe-partout… (${i + 1}/${twins.length})`)

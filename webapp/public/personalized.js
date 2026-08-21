@@ -873,17 +873,21 @@ async function addProofToResults() {
   btn.textContent = 'Composition…'
   try {
     const url = await buildProofImage(pTest.photo, pTest.lastRender)
+    // Un nouveau test rend le bouton à nouveau actif : la preuve du test précédent est REMPLACÉE,
+    // jamais empilée (sinon on publie autant de preuves que d'essais).
+    const stale = state.results.filter((r) => r.proof)
+    if (stale.length) state.results = state.results.filter((r) => !r.proof)
     state.results.push({
       id: 'proof' + Date.now() + Math.random().toString(36).slice(2, 5),
       path: null,
       url,
       context: 'Avant / après — de la photo au tableau',
       label: 'Avant / après',
+      proof: true, // statut à part : ni jumeau passe-partout, ni bascule « avec / sans cadre »
     })
-    // PAS de jumeau passe-partout : ce visuel n'est pas une œuvre encadrable, c'est une preuve.
     renderResults()
     refreshAction()
-    toast('Preuve ajoutée aux visuels ✓ — réordonnable dans la carte 6', 'ok')
+    toast('Preuve ajoutée aux visuels ✓ — elle reste en fin de galerie', 'ok')
     btn.textContent = 'Preuve ajoutée ✓'
   } catch (e) {
     toast('Composition impossible : ' + e.message, 'err')
@@ -1665,7 +1669,7 @@ function personalizedPublishGate() {
   // Un échec d'analyse ne BLOQUE pas (le produit naît en brouillon, et Gemini indisponible ne
   // doit pas arrêter la boutique) : il s'affiche en gros sur les cartes 3 et 4, avec réessayer.
   if (!state.collection) missing.push('collection')
-  if (!state.results.length) missing.push('≥1 rendu')
+  if (!state.results.some((r) => !r.proof)) missing.push('≥1 rendu') // la preuve n'en est pas un
   return { ok: missing.length === 0, hint: missing.length ? 'Manque : ' + missing.join(' · ') : 'Prêt à publier' }
 }
 function refreshActionPersonalized() {
