@@ -490,6 +490,7 @@ function renderRecipeForm() {
   wrap.innerHTML = P.join('')
   wireRecipeEvents()
   renderRecipeValidation()
+  renderRecipeTest()
 }
 function wireRecipeEvents() {
   // champs simples liés à un chemin
@@ -615,6 +616,134 @@ async function runServerVerify() {
   } finally {
     btn.disabled = false
   }
+}
+
+/* ---------- Tester le prompt : un rendu d'essai AVANT publication ----------
+   Il fallait publier un produit puis commander dans le studio pour savoir ce qu'un design allait
+   rendre — chaque réglage de prompt coûtait donc une publication. Le back emprunte le MÊME chemin
+   que la production (textes lus sur le design, fragments imposés, même juge) : ce qu'on voit ici
+   est ce que la cliente obtiendra. */
+const pTest = { inflight: false, photo: null }
+
+// Champs texte du parcours : ce sont eux qui alimentent le titre et les légendes du dessin.
+const testValueSteps = () =>
+  ((pState.config && pState.config.steps) || []).filter((s) => ['text', 'number', 'date'].includes(s.type))
+
+function renderRecipeTest() {
+  const wrap = $('#recipeTest')
+  if (!wrap) return
+  if (!pState.config || !pState.recipe) { wrap.innerHTML = ''; return }
+  const fields = testValueSteps()
+  wrap.innerHTML = `
+    <div class="studio-sub">
+      <p class="studio-sub-title">Tester le prompt</p>
+      <p class="sf-help">Une photo, un rendu — sans rien publier. Même prompt et même juge qu'une vraie commande.</p>
+      ${fields.map((s) => fieldBlock(
+        t(s.label, 'fr') || t(s.title, 'fr') || s.name, '',
+        `<input type="text" class="decor-vibe" data-test-value="${escapeHtml(s.payloadKey || s.name)}"
+           maxlength="200" placeholder="${escapeHtml(t(s.placeholder, 'fr') || 'Ce que la cliente écrirait')}">`
+      )).join('')}
+      ${fieldBlock('Photo de la cliente', '', `<input type="file" accept="image/*" id="rt-photo" class="decor-vibe">`)}
+      <div class="photo-ex-slot"><img id="rt-photo-img" src="" alt="" style="min-height:60px"></div>
+      <div class="resize-actions">
+        <button type="button" class="ghost-btn" id="rt-run">🧪 Tester le prompt</button>
+      </div>
+      <div id="rt-result"></div>
+    </div>`
+  wireRecipeTestEvents()
+}
+
+function wireRecipeTestEvents() {
+  const file = $('#rt-photo')
+  if (file) file.addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0]
+    if (!f || !f.type.startsWith('image/')) return
+    const reader = new FileReader()
+    reader.onload = () => { pTest.photo = reader.result; $('#rt-photo-img').src = reader.result }
+    reader.readAsDataURL(f)
+  })
+  const run = $('#rt-run')
+  if (run) run.addEventListener('click', runRecipeTest)
+}
+
+async function runRecipeTest() {
+  if (pTest.inflight) return
+  if (!state.imageDataUrl) return toast("Ajoute d'abord ton design (carte 1).", 'err')
+  if (!pTest.photo) return toast('Choisis une photo de cliente pour le test.', 'err')
+
+  const values = {}
+  $$('#recipeTest [data-test-value]').forEach((el) => { values[el.dataset.testValue] = el.value.trim() })
+
+  const btn = $('#rt-run')
+  const box = $('#rt-result')
+  pTest.inflight = true
+  btn.disabled = true
+  btn.textContent = '⏳ Génération et jugement… (~1 min)'
+  box.innerHTML = ''
+  try {
+    const { res, data } = await fetchJsonT(
+      API + '/api/test-recipe',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          artwork: state.imageDataUrl,
+          photo: pTest.photo,
+          studioConfig: pState.config,
+          studioRecipe: pState.recipe,
+          values,
+        }),
+      },
+      90000
+    )
+    if (res.status === 401) throw new Error('Session expirée — reconnecte-toi.')
+    const jobId = data.data && data.data.jobId
+    if (!res.ok || !data.success || !jobId) throw new Error(data.message || 'Démarrage impossible.')
+
+    const started = Date.now()
+    let result = null
+    while (!result) {
+      if (Date.now() - started > 8 * 60 * 1000) throw new Error('Le test a expiré.')
+      await sleep(3000)
+      const { res: r2, data: d2 } = await fetchJsonT(
+        API + '/api/test-recipe/result?id=' + encodeURIComponent(jobId),
+        { headers: { Accept: 'application/json' } },
+        20000
+      )
+      if (r2.status === 404 || d2.status === 'not_found') throw new Error('Session de test expirée.')
+      if (d2.status === 'error') throw new Error(d2.message || 'Échec du test.')
+      if (d2.status === 'done' && d2.data) result = d2.data
+    }
+    renderTestResult(result)
+  } catch (e) {
+    box.innerHTML = `<div class="studio-validation err">${escapeHtml(e.message)}</div>`
+  } finally {
+    pTest.inflight = false
+    const b = $('#rt-run')
+    if (b) { b.disabled = false; b.textContent = '🧪 Tester le prompt' }
+  }
+}
+
+// Le verdict du juge est affiché AVEC son motif : c'est lui qui recale les candidats en production,
+// donc c'est lui qu'il faut pouvoir lire ici pour corriger le prompt sans publier.
+function renderTestResult(r) {
+  const box = $('#rt-result')
+  const verdict = r.pass
+    ? `<div class="studio-validation ok">✓ Le juge accepterait ce rendu${r.score != null ? ` — note ${r.score}/10` : ''}</div>`
+    : `<div class="studio-validation err">✗ Le juge le refuserait${r.score != null ? ` — note ${r.score}/10` : ''}${r.reason ? `<br>${escapeHtml(r.reason)}` : ''}</div>`
+  const warns = (r.warnings || []).length
+    ? `<ul class="sf-help">${r.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`
+    : ''
+  box.innerHTML = `
+    <div class="photo-ex-slot"><img src="${r.image}" alt="Rendu d'essai"></div>
+    ${verdict}${warns}
+    <button type="button" class="i18n-toggle" id="rt-prompt-toggle">▾ Voir le prompt envoyé</button>
+    <div id="rt-prompt" class="hidden"><textarea readonly style="min-height:220px">${escapeHtml(r.prompt)}</textarea></div>`
+  const tog = $('#rt-prompt-toggle')
+  if (tog) tog.addEventListener('click', () => {
+    const hidden = $('#rt-prompt').classList.toggle('hidden')
+    tog.textContent = hidden ? '▾ Voir le prompt envoyé' : '▴ Masquer le prompt'
+  })
 }
 
 /* ---------- Éditeur d'étape (overlay) ---------- */
