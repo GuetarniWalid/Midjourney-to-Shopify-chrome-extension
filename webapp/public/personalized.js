@@ -887,7 +887,7 @@ async function addProofToResults() {
     })
     renderResults()
     refreshAction()
-    toast('Preuve ajoutée aux visuels ✓ — elle reste en fin de galerie', 'ok')
+    toast('Preuve ajoutée ✓ — elle ouvre la galerie et sert d’image de carte', 'ok')
     btn.textContent = 'Preuve ajoutée ✓'
   } catch (e) {
     toast('Composition impossible : ' + e.message, 'err')

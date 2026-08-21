@@ -2017,10 +2017,10 @@ function renderResults() {
     empty = $('#resultsEmpty')
   grid.innerHTML = ''
   empty.classList.toggle('hidden', state.results.length > 0)
-  // Les preuves « avant -> après » sont affichées EN FIN et ne se glissent pas : la publication les
+  // Les preuves « avant -> après » sont affichées EN TÊTE et ne se glissent pas : la publication les
   // épingle là (cf. la boucle d'empaquetage), donc une poignée de glisser promettrait un
   // déplacement sans effet. L'ordre affiché est ainsi celui qui part vraiment.
-  const rows = [...state.results].sort((a, b) => (a.proof ? 1 : 0) - (b.proof ? 1 : 0))
+  const rows = [...state.results].sort((a, b) => (b.proof ? 1 : 0) - (a.proof ? 1 : 0))
   rows.forEach((res, i) => {
     const cell = document.createElement('div')
     cell.className = 'result-cell' + (res.proof ? ' is-proof' : '')
@@ -2863,11 +2863,14 @@ $('#publishBtn').addEventListener('click', async () => {
         fr.readAsDataURL(b)
       })
     }
-    // Les preuves « avant -> après » sont ÉPINGLÉES EN FIN, quel que soit l'ordre choisi dans la
-    // carte 6 : en 1re position, une image hérite de l'alt et du slug de l'œuvre côté backend, et
-    // devient l'image de carte, le JSON-LD et la LCP de la fiche produit.
+    // Les preuves « avant -> après » ouvrent la galerie, quel que soit l'ordre de la carte 6 :
+    // c'est l'argument de vente d'un poster personnalisé, il doit être la 1re chose vue. Elle
+    // devient donc aussi l'image de carte (collections), le JSON-LD et la LCP de la fiche.
+    // Elle NE prend PAS l'alt ni le slug de l'œuvre pour autant : côté backend, la branche
+    // `proof` de composePosterMedia est testée AVANT celle du 1er mockup.
+    // L'œuvre reste l'image n°2 (le `i === 0` ci-dessous l'insère juste après la 1re entrée).
     const snapshot = [...state.results]
-    const ordered = [...snapshot].sort((a, b) => (a.proof ? 1 : 0) - (b.proof ? 1 : 0))
+    const ordered = [...snapshot].sort((a, b) => (b.proof ? 1 : 0) - (a.proof ? 1 : 0))
     for (let i = 0; i < ordered.length; i++) {
       progress.step(`Préparation des images… (${i + 1}/${ordered.length})`)
       const res = ordered[i]
