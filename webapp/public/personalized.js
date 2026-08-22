@@ -475,6 +475,19 @@ function renderRecipeForm() {
   </div>`)
   P.push('</div>')
 
+  // Modèle d'image : le SEUL réglage moteur exposé. Il existe parce que certains styles passent
+  // mal chez un fournisseur et bien chez l'autre — le reste (versions, essais) garde ses défauts.
+  const modelChoice = recipeModelChoice(r)
+  P.push('<div class="studio-sub"><p class="studio-sub-title">Modèle d’image</p>')
+  P.push(fieldBlock(
+    '',
+    'Sert au rendu d’essai ET aux vraies commandes. Ce modèle sera le seul utilisé : en cas d’échec, la commande part en revue plutôt que de rendre un autre style.',
+    `<select id="rf-model" class="decor-vibe">${RECIPE_MODELS.map((m) =>
+      `<option value="${m.id}"${m.id === modelChoice ? ' selected' : ''}>${escapeHtml(m.label)}</option>`
+    ).join('')}</select>`
+  ))
+  P.push('</div>')
+
   // Prompt
   P.push('<div class="studio-sub"><p class="studio-sub-title">Prompt (en anglais — Gemini suit mieux l’anglais)</p>')
   P.push(fieldBlock('Base (obligatoire)', '', `<textarea data-recipe="prompt.base" style="min-height:120px">${escapeHtml(r.prompt.base || '')}</textarea>`))
@@ -493,6 +506,11 @@ function renderRecipeForm() {
   renderRecipeTest()
 }
 function wireRecipeEvents() {
+  const model = $('#rf-model')
+  if (model) model.addEventListener('change', () => {
+    setRecipeModelChoice(pState.recipe, model.value)
+    renderRecipeValidation()
+  })
   // champs simples liés à un chemin
   $$('#recipeForm [data-recipe]').forEach((el) =>
     el.addEventListener('input', () => {
@@ -735,8 +753,10 @@ function renderTestResult(r) {
     ? `<ul class="sf-help">${r.warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join('')}</ul>`
     : ''
   pTest.lastRender = r.image
+  const modelLabel = providerLabel(r.provider)
   box.innerHTML = `
     <div class="photo-ex-slot"><img src="${r.image}" alt="Rendu d'essai"></div>
+    <p class="sf-help">Rendu par ${escapeHtml(modelLabel)}</p>
     ${verdict}${warns}
     <div class="resize-actions">
       <button type="button" class="primary-btn" id="rt-proof">＋ Ajouter la preuve aux visuels</button>
@@ -913,6 +933,37 @@ function closeStepEditor() {
   pState.editing = null
 }
 // Construit un bloc « champ simple » (input/select/textarea) piloté par un getter/setter.
+// Modèles d'image proposés. Le back accepte n'importe quel « <fournisseur>:<modèle> » ; ici la
+// liste est FERMÉE — un identifiant libre ne se verrait refusé qu'à la publication.
+// « Par défaut » n'écrit RIEN dans la recette : le produit retombe sur son modèle historique,
+// c'est ce qui garantit qu'aucun tableau déjà publié ne change de comportement.
+const RECIPE_MODELS = [
+  { id: '', label: 'Par défaut (Gemini)' },
+  { id: 'openai:gpt-image-2', label: 'ChatGPT (GPT Image)' },
+]
+// Modèle actuellement choisi = 1re entrée de la chaîne, ou « par défaut » si aucune chaîne.
+function recipeModelChoice(r) {
+  const first = r && r.providers && r.providers.chain && r.providers.chain[0]
+  return RECIPE_MODELS.some((m) => m.id && m.id === first) ? first : ''
+}
+// Écrit le choix : le modèle choisi et LUI SEUL.
+// Un secours serait un piège ici. Une commande lance plusieurs rendus EN PARALLÈLE, chacun
+// bascule sur le maillon suivant à la moindre erreur (un 429 suffit), et c'est le rendu le mieux
+// noté qui est élu — pas celui du modèle demandé. Un incident réseau livrerait donc à la cliente
+// le style qu'on avait justement choisi d'éviter, sans que rien ne le signale. En cas d'échec
+// total, la commande part en revue manuelle : c'est le comportement historique, et il est honnête.
+function setRecipeModelChoice(r, id) {
+  if (!id) { delete r.providers; return }
+  r.providers = { chain: [id] }
+}
+// Libellé lisible d'un modèle : les clés Gemini ne sont pas dans la liste (elles viennent du
+// réglage historique du produit), il ne faut pas afficher l'identifiant technique pour autant.
+function providerLabel(key) {
+  const known = RECIPE_MODELS.find((m) => m.id && m.id === key)
+  if (known) return known.label
+  if (String(key || '').startsWith('gemini:')) return 'Gemini (modèle habituel)'
+  return key || 'modèle inconnu'
+}
 function fieldBlock(label, help, controlHtml) {
   return `<div class="studio-field"><label>${escapeHtml(label)}</label>${controlHtml}${help ? `<p class="sf-help">${escapeHtml(help)}</p>` : ''}</div>`
 }
