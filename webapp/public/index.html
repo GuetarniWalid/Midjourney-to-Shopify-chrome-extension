@@ -43,6 +43,15 @@
     <!-- 1. Upload -->
     <section class="card" id="uploadCard">
       <h2 class="card-title">1 · Votre image</h2>
+      <!-- Chemin d'une toile : mockups (défaut) ou nouvelle fiche. Avant l'image, parce que l'image
+           lance les mockups favoris. Révélé par artwork-draft.js, pour une toile à créer seulement. -->
+      <div id="draftChoice" class="draft-choice hidden">
+        <div class="seg" role="group" aria-label="Photos de la toile">
+          <button class="seg-btn active" data-path="mockups">Mockups</button>
+          <button class="seg-btn" data-path="draft">Nouvelle fiche</button>
+        </div>
+        <p id="draftChoiceNote" class="draft-note hidden">Toile seulement, créée en brouillon. Pas de mockups : les photos se font toutes seules.</p>
+      </div>
       <label id="dropzone" class="dropzone" for="fileInput">
         <input type="file" id="fileInput" accept="image/*" hidden>
         <div class="dz-inner" id="dzInner">
@@ -121,6 +130,12 @@
       <div id="recipeVerifyResult" class="studio-validation hidden"></div>
       <!-- Test du prompt : rendu d'essai + verdict du juge, sans publier (rempli par personalized.js) -->
       <div id="recipeTest"></div>
+    </section>
+
+    <!-- 3. Nouvelle fiche : remplace les cartes Mockups et Rendus (révélée par artwork-draft.js) -->
+    <section class="card hidden" id="draftCard">
+      <h2 class="card-title">3 · Photos et textes</h2>
+      <p class="draft-explain">Quatre photos de la toile se préparent toutes seules : de face, de trois-quarts, la matière et le coin du cadre. Claude écrit les textes en même temps. Il faut compter une minute environ, puis vous vérifiez tout avant de créer le brouillon.</p>
     </section>
 
     <!-- 3. Mockups (catalogue Photopea + décors IA, regroupés par pièce) -->
@@ -332,6 +347,29 @@
     </div>
   </div>
 
+  <!-- Overlay de la nouvelle fiche : préparation, validation, création (rempli par artwork-draft.js) -->
+  <div id="draftOverlay" class="resize-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="draftTitle">
+    <div class="resize-card draft-card" tabindex="-1">
+      <h3 id="draftTitle">Préparation de la toile</h3>
+      <div id="draftSpinner" class="resize-loading"><div class="progress-ring"></div></div>
+      <ul id="draftSteps" class="draft-steps"></ul>
+      <p id="draftNote" class="draft-note" aria-live="polite"></p>
+      <p id="draftProblem" class="draft-problem hidden" role="alert"></p>
+      <div id="draftReview" class="hidden">
+        <div id="draftPhotos" class="draft-photos"></div>
+        <dl id="draftTexts" class="draft-texts"></dl>
+      </div>
+      <div class="resize-actions">
+        <button id="draftCreate" class="primary-btn hidden">Créer le brouillon</button>
+        <button id="draftRetry" class="primary-btn hidden">Réessayer</button>
+        <a id="draftLink" class="primary-btn hidden" target="_blank" rel="noopener">Ouvrir dans l'admin</a>
+        <button id="draftMockups" class="ghost-btn hidden">Passer par les mockups</button>
+        <button id="draftCancel" class="ghost-btn hidden">Annuler</button>
+        <button id="draftClose" class="ghost-btn hidden">Fermer</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Overlay de progression (publication) -->
   <div id="progress" class="progress-overlay hidden">
     <div class="progress-card">
@@ -350,5 +388,6 @@
 <script src="app.js"></script>
 <script src="lib/validate-studio-config.js"></script>
 <script src="personalized.js"></script>
+<script src="artwork-draft.js"></script>
 </body>
 </html>

@@ -15,7 +15,8 @@ const MIRROR = path.join(BACKEND, 'public', 'publisher')
 const EDGE = path.join(BACKEND, 'resources', 'views', 'pages', 'publisher.edge')
 
 // --- 1. copies byte-identiques ---
-for (const f of ['app.js', 'style.css', 'bulk-posters.js', 'personalized.js']) {
+const COPIES = ['app.js', 'style.css', 'bulk-posters.js', 'personalized.js', 'artwork-draft.js']
+for (const f of COPIES) {
   fs.copyFileSync(path.join(FRONT, f), path.join(MIRROR, f))
   console.log(`copié  ${f} -> ${path.join(MIRROR, f)}`)
 }
@@ -86,6 +87,11 @@ const persLocal = '<script src="personalized.js"></script>'
 if (!html.includes(persLocal)) throw new Error('balise personalized.js introuvable dans index.html')
 html = html.replace(persLocal, `<script src="/publisher/personalized.js?v=${vPers}"></script>`)
 
+const vDraft = sha10('artwork-draft.js')
+const draftLocal = '<script src="artwork-draft.js"></script>'
+if (!html.includes(draftLocal)) throw new Error('balise artwork-draft.js introuvable dans index.html')
+html = html.replace(draftLocal, `<script src="/publisher/artwork-draft.js?v=${vDraft}"></script>`)
+
 fs.writeFileSync(EDGE, html)
 console.log(`généré ${EDGE}`)
 
@@ -116,7 +122,7 @@ console.log(`généré ${BULK_EDGE}`)
 
 // --- 3. vérification de parité ---
 const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 12)
-for (const f of ['app.js', 'style.css', 'bulk-posters.js', 'personalized.js']) {
+for (const f of COPIES) {
   const a = sha(path.join(FRONT, f))
   const b = sha(path.join(MIRROR, f))
   if (a !== b) throw new Error(`désynchro ${f} : ${a} != ${b}`)

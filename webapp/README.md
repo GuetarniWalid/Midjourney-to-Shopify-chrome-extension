@@ -61,6 +61,11 @@ par le backend via `window.PUBLISHER_CONFIG.mode` (ou `?mode=…` en local sur l
   par metafields). Logique dédiée dans `public/personalized.js` (chargé après `app.js`, même scope) ;
   `app.js` ne porte que les points de branchement (`IS_PERSONALIZED`).
 
+En mode **create**, une toile a un second chemin, à choisir en haut de la page : **Nouvelle fiche**.
+Pas de mockups ni de moteur du PC : le backend rend les photos, Claude écrit les textes, un écran
+montre le tout, et un clic crée le brouillon (`/api/artwork-drafts`, voir `App/Services/ArtworkDraft`
+du backend). Logique dans `public/artwork-draft.js`. Les mockups restent le défaut.
+
 ### Poster personnalisé (mode `personalized`)
 
 Industrialise la création d'un produit « studio » (ex. poster famille en dessin au trait) piloté

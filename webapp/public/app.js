@@ -1909,6 +1909,7 @@ $('#sectionCancel').addEventListener('click', closeSectionPicker)
 // seule fois par œuvre : mockups Photopea favoris -> rendu ; décors IA favoris -> insertion.
 function maybeRunFavorites() {
   if (IS_REIMAGE) return // v2 : génération 100 % manuelle (pas de lot auto sur l'œuvre du produit)
+  if (window.ArtworkDraftMode && window.ArtworkDraftMode.active()) return // nouvelle fiche : pas de mockups
   if (!state.imageDataUrl || state.needsResize || !state.orientation) return
   if (state.lastBatchImage === state.imageDataUrl) return // déjà appliqué pour cette œuvre
   runFavoritesBatch()
@@ -2777,6 +2778,8 @@ function refreshAction() {
   if (IS_REIMAGE) return refreshActionReimage()
   // personalized : mêmes conditions que le mode create + config/recette valides (géré là-bas)
   if (IS_PERSONALIZED && window.PersonalizedMode) return window.PersonalizedMode.refreshAction()
+  // nouvelle fiche, si elle est choisie (artwork-draft.js) : elle prend la barre d'action
+  if (window.ArtworkDraftMode && window.ArtworkDraftMode.refreshAction()) return
   const info = $('#actionInfo'),
     btn = $('#publishBtn')
   const n = state.results.length
@@ -2844,6 +2847,7 @@ function refreshActionReimage() {
 $('#publishBtn').addEventListener('click', async () => {
   const btn = $('#publishBtn')
   if (btn.disabled) return
+  if (window.ArtworkDraftMode && window.ArtworkDraftMode.active()) return window.ArtworkDraftMode.start()
   btn.disabled = true
   progress.show('Préparation des images…')
   if (IS_REIMAGE) $('#progressTitle').textContent = 'Remplacement en cours…'

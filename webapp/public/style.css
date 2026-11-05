@@ -442,6 +442,41 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .studio-preview-body .sp-ex.bad img{border-color:var(--danger)}
 .studio-preview-body .sp-ex span{display:block;font-size:12px;color:var(--muted);margin-top:4px}
 
+/* ---- nouvelle fiche : choix du chemin, préparation et validation (artwork-draft.js) ---- */
+.draft-choice{margin-bottom:var(--s3);display:flex;flex-direction:column;gap:var(--s2)}
+#draftCard{grid-column:1 / -1}
+.draft-explain{margin:0;font-size:15px;line-height:1.5;color:var(--muted)}
+.draft-note{margin:0;font-size:14px;line-height:1.5;color:var(--muted)}
+.draft-card{max-width:860px}
+.draft-card .resize-loading{padding:var(--s3) 0}
+.draft-card .draft-note{text-align:center}
+.draft-steps{list-style:none;margin:0 0 var(--s3);padding:0;display:flex;flex-direction:column;gap:var(--s2)}
+.draft-steps:empty{display:none}
+.draft-step{padding:var(--s3);border:1px solid var(--border-soft);border-radius:var(--r-md);font-size:14px;line-height:1.5;color:var(--muted)}
+.draft-step b{display:block;color:var(--text);font-weight:600}
+.draft-step.ok b{color:var(--ok)}
+.draft-step.err b{color:var(--danger)}
+.draft-problem{margin:0 0 var(--s4);padding:var(--s3) var(--s4);border-radius:var(--r-md);background:var(--danger-weak);color:var(--danger);font-size:14px;line-height:1.5}
+.draft-photos{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:var(--s4);margin-bottom:var(--s5)}
+.draft-photo{margin:0;display:flex;flex-direction:column;gap:var(--s2);min-width:0}
+.draft-card:focus{outline:none}
+.draft-photo button{display:block;width:100%;padding:0;border:0;background:none;cursor:zoom-in}
+.draft-photo img{display:block;width:100%;aspect-ratio:2048/2400;object-fit:contain;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface-2)}
+.draft-photo figcaption{display:flex;flex-direction:column;gap:2px;font-size:12px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
+.draft-photo figcaption b{color:var(--text);font-weight:600;font-size:13px}
+.draft-photo figcaption small{color:var(--faint);font-size:11px}
+.draft-texts{margin:0;display:flex;flex-direction:column;gap:var(--s1)}
+.draft-texts dt{font-size:13px;font-weight:600;color:var(--muted)}
+.draft-texts dd{margin:0 0 var(--s3);font-size:15px;line-height:1.5}
+.draft-texts dd h4{margin:0 0 var(--s2);font-size:16px;font-weight:600}
+.draft-texts dd p{margin:0 0 var(--s2)}
+/* Les boutons restent à portée pendant qu'on lit : la carte a sa marge de --s5, d'où le décalage. */
+.draft-card .resize-actions{position:sticky;bottom:calc(-1 * var(--s5));margin-bottom:calc(-1 * var(--s5));padding:var(--s3) 0 var(--s5);background:var(--surface)}
+.draft-card a.primary-btn{display:block;text-align:center;text-decoration:none}
+.draft-card button:disabled{opacity:.6;cursor:not-allowed}
+/* L'agrandissement d'une photo passe devant l'écran de validation. */
+body.draft-open .lightbox{z-index:80}
+
 /* ---- accessibilité : mouvement réduit ---- */
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important}
