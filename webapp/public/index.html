@@ -135,7 +135,7 @@
     <!-- 3. Nouvelle fiche : remplace les cartes Mockups et Rendus (révélée par artwork-draft.js) -->
     <section class="card hidden" id="draftCard">
       <h2 class="card-title">3 · Photos et textes</h2>
-      <p class="draft-explain">Quatre photos de la toile se préparent toutes seules : de face, de trois-quarts, la matière et le coin du cadre. Claude écrit les textes en même temps. Il faut compter une minute environ, puis vous vérifiez tout avant de créer le brouillon.</p>
+      <p class="draft-explain">Quatre photos de la toile se préparent toutes seules : de face, de trois-quarts, la matière et le coin du cadre. Claude écrit les textes en même temps. Il faut compter une minute environ, puis vous vérifiez tout avant de créer le brouillon. Une image de moins de 4 000 px est d'abord agrandie pour le site et comparée à la vôtre : comptez alors deux minutes. Votre image reste telle quelle.</p>
     </section>
 
     <!-- 3. Mockups (catalogue Photopea + décors IA, regroupés par pièce) -->
@@ -356,11 +356,19 @@
       <p id="draftNote" class="draft-note" aria-live="polite"></p>
       <p id="draftProblem" class="draft-problem hidden" role="alert"></p>
       <div id="draftReview" class="hidden">
+        <section id="draftCompare" class="draft-compare hidden" aria-labelledby="draftCompareTitle">
+          <h4 id="draftCompareTitle">Votre image et l'image agrandie</h4>
+          <p id="draftCompareZone" class="draft-note">Sous chaque image, un gros plan au même endroit : là où l'image a le plus changé. Touchez une image pour la voir en grand.</p>
+          <div id="draftCompareGrid" class="draft-photos draft-compare-grid"></div>
+          <a id="draftSourceLink" class="draft-source" target="_blank" rel="noopener">Ouvrir votre image d'origine</a>
+        </section>
         <div id="draftPhotos" class="draft-photos"></div>
         <dl id="draftTexts" class="draft-texts"></dl>
       </div>
       <div class="resize-actions">
         <button id="draftCreate" class="primary-btn hidden">Créer le brouillon</button>
+        <button id="draftKeep" class="primary-btn hidden">Garder l'image agrandie</button>
+        <button id="draftOriginal" class="primary-btn hidden">Garder mon image d'origine</button>
         <button id="draftRetry" class="primary-btn hidden">Réessayer</button>
         <a id="draftLink" class="primary-btn hidden" target="_blank" rel="noopener">Ouvrir dans l'admin</a>
         <button id="draftMockups" class="ghost-btn hidden">Passer par les mockups</button>

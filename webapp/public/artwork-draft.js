@@ -3,6 +3,9 @@
    backend rend les photos pendant que Claude écrit les textes, Walid vérifie tout sur un écran, et
    un clic crée le brouillon. Le chemin des mockups reste le défaut et ne change pas.
 
+   Ticket 16 : une image de moins de 4 000 px est d'abord agrandie pour le site, puis comparée à
+   l'originale. Un échec ou un écart se disent ici, et Walid choisit : rien ne se crée sans lui.
+
    Chargé après app.js, même scope global (comme personalized.js) ; app.js ne porte que les points
    de branchement : refreshAction, maybeRunFavorites et le clic sur le bouton d'action. */
 ;(function () {
@@ -16,7 +19,37 @@
     return `${Math.floor(seconds / 60)} min ${String(seconds % 60).padStart(2, '0')}`
   }
 
-  function photosStep({ status, studioBusy, ahead, attempts }) {
+  function imageStep(upscale) {
+    if (!upscale) return { state: 'ok', text: 'Assez grande, gardée telle quelle' }
+    switch (upscale.state) {
+      case 'working':
+        return {
+          state: 'wait',
+          text: 'Votre image est agrandie pour le site, environ 30 secondes. Les photos suivent.',
+        }
+      case 'failed':
+        return { state: 'err', text: "N'a pas pu être agrandie" }
+      case 'checking':
+        return { state: 'wait', text: 'Agrandie. Comparaison avec votre image en cours…' }
+      case 'doubtful':
+        return { state: 'warn', text: 'Agrandie, mais à vérifier' }
+      case 'kept':
+        return { state: 'ok', text: 'Agrandie, gardée après vérification' }
+      case 'original':
+        return { state: 'ok', text: "Votre image d'origine, telle quelle" }
+      default:
+        return { state: 'ok', text: 'Agrandie pour le site, fidèle à la vôtre' }
+    }
+  }
+
+  function photosStep({ status, studioBusy, ahead, attempts }, upscale) {
+    if (status === 'waiting') {
+      if (upscale && upscale.state === 'failed') return { state: 'wait', text: 'Attendent votre choix.' }
+      if (upscale && upscale.state === 'checking') {
+        return { state: 'wait', text: 'Attendent la fin de la comparaison, puis environ 45 secondes.' }
+      }
+      return { state: 'wait', text: "Attendent l'image agrandie, puis environ 45 secondes." }
+    }
     if (status === 'done') return { state: 'ok', text: 'Prêtes' }
     if (status === 'failed') return { state: 'err', text: "N'ont pas pu être préparées" }
     if (status === 'rendering') {
@@ -45,17 +78,58 @@
   }
 
   const FAILED_TITLES = {
+    upscale: "L'image n'a pas pu être agrandie",
     photos: "Les photos n'ont pas pu être préparées",
     texts: "Les textes n'ont pas pu être écrits",
   }
 
+  const UPSCALE_REASONS = {
+    shapes: 'des formes ont changé',
+    colors: 'les couleurs ont bougé',
+    details: 'des détails ont été ajoutés',
+  }
+
+  /** « a, b et c » */
+  function inWords(items) {
+    return items.length > 1 ? `${items.slice(0, -1).join(', ')} et ${items[items.length - 1]}` : items[0]
+  }
+
+  function upscaleAlert({ reasons }) {
+    const seen = reasons.length
+      ? `L'agrandissement s'écarte de votre image : ${inWords(reasons.map((reason) => UPSCALE_REASONS[reason]))}.`
+      : "La comparaison automatique avec votre image n'a pas pu se faire."
+    return (
+      `${seen} Comparez les deux versions ci-dessous, puis choisissez. Rien ne sera créé sans votre accord. ` +
+      "Avec votre image d'origine, les photos se refont : environ 45 secondes."
+    )
+  }
+
+  function upscaleFailure({ noCredit }) {
+    return noCredit
+      ? "Il n'y a plus de crédit pour agrandir les images. Rien n'est perdu : votre image est gardée telle quelle. Continuez avec elle, ou réessayez une fois le crédit rechargé."
+      : "Rien n'est perdu : votre image est gardée telle quelle. Vous pouvez réessayer, ou continuer avec elle."
+  }
+
   /** Ce que montre l'écran pour un état du brouillon. Sans DOM : tests/golden/artwork-draft-screen.js. */
   function draftScreen(view, elapsedMs, { offline = false } = {}) {
-    const screen = { title: '', busy: false, steps: [], note: '', problem: null, review: false, buttons: [] }
+    const screen = {
+      title: '',
+      busy: false,
+      steps: [],
+      note: '',
+      problem: null,
+      review: false,
+      compare: false,
+      buttons: [],
+    }
+    const upscale = view.upscale || null
     const steps = () => [
-      { name: 'Photos', ...photosStep(view.photos) },
+      { name: 'Image', ...imageStep(upscale) },
+      { name: 'Photos', ...photosStep(view.photos, upscale) },
       { name: 'Textes', ...textsStep(view.texts) },
     ]
+    // Les deux images côte à côte, tant que c'est l'agrandie qui part sur la fiche.
+    const compare = !!(upscale && upscale.upscaled && upscale.state !== 'original')
 
     switch (view.stage) {
       case 'sending':
@@ -75,12 +149,30 @@
           buttons: ['close'],
         }
       case 'failed':
+        if (view.problem === 'upscale') {
+          return {
+            ...screen,
+            title: FAILED_TITLES.upscale,
+            steps: steps(),
+            problem: upscaleFailure(upscale),
+            buttons: ['original', 'retry', 'mockups', 'cancel'],
+          }
+        }
         return {
           ...screen,
           title: FAILED_TITLES[view.problem],
           steps: steps(),
           problem: "Rien n'a été créé. Vous pouvez réessayer, ou passer par les mockups avec la même image.",
           buttons: ['retry', 'mockups', 'cancel'],
+        }
+      case 'deciding':
+        return {
+          ...screen,
+          title: "À vérifier : l'image agrandie",
+          problem: upscaleAlert(upscale),
+          review: true,
+          compare,
+          buttons: ['keep', 'original', 'cancel'],
         }
       case 'ready': {
         const created = view.problem === 'creation'
@@ -93,6 +185,7 @@
               ? "Un brouillon incomplet est resté sur la boutique : il sera retiré au prochain essai. Sinon, supprimez-le dans l'admin."
               : "Rien n'est resté sur la boutique. Vous pouvez réessayer, ou passer par les mockups.",
           review: true,
+          compare,
           buttons: !created
             ? ['create', 'cancel']
             : view.leftoverUrl
@@ -119,6 +212,7 @@
       default: {
         const slow = elapsedMs >= LONG_WAIT_MS
         const elapsed = `Déjà ${elapsedLabel(elapsedMs)}.`
+        const longer = upscale && upscale.state !== 'original' ? " Avec l'agrandissement, comptez deux minutes environ." : ''
         return {
           ...screen,
           title: 'Préparation de la toile',
@@ -128,7 +222,7 @@
             ? 'Connexion interrompue, nouvel essai en cours… Votre toile continue de se préparer.'
             : slow
               ? `${elapsed} C'est plus long que d'habitude. Vous pouvez continuer à attendre, ou annuler.`
-              : `${elapsed} Rien n'est bloqué, vous pouvez attendre ici.`,
+              : `${elapsed}${longer} Rien n'est bloqué, vous pouvez attendre ici.`,
           buttons: ['cancel'],
         }
       }
@@ -154,8 +248,11 @@
 
   const overlay = $('#draftOverlay')
   const review = $('#draftReview')
+  const compare = $('#draftCompare')
   const buttons = {
     create: $('#draftCreate'),
+    keep: $('#draftKeep'),
+    original: $('#draftOriginal'),
     retry: $('#draftRetry'),
     link: $('#draftLink'),
     mockups: $('#draftMockups'),
@@ -221,6 +318,57 @@
     })
   }
 
+  /** Un carré de 15 % de la largeur, centré sur la zone qui a le plus changé et gardé dans l'image. */
+  function closeUp({ url, width, height }, zone) {
+    const across = 0.15
+    const down = (across * width) / height
+    const left = Math.min(1 - across, Math.max(0, zone.x + zone.width / 2 - across / 2))
+    const top = Math.min(1 - down, Math.max(0, zone.y + zone.height / 2 - down / 2))
+    return {
+      backgroundImage: `url("${url}")`,
+      backgroundSize: `${100 / across}% auto`,
+      backgroundPosition: `${(left / (1 - across)) * 100}% ${(top / (1 - down)) * 100}%`,
+    }
+  }
+
+  /** Votre image et l'image agrandie côte à côte, chacune avec son gros plan au même endroit. */
+  function paintCompare({ source, upscaled, zone }) {
+    const grid = $('#draftCompareGrid')
+    grid.innerHTML = ''
+    for (const [label, image] of [
+      ['Votre image', source],
+      ['Agrandie pour le site', upscaled],
+    ]) {
+      const figure = document.createElement('figure')
+      figure.className = 'draft-photo'
+      const zoom = document.createElement('button')
+      zoom.type = 'button'
+      zoom.title = 'Agrandir'
+      zoom.addEventListener('click', () => openLightbox(image.url))
+      const picture = document.createElement('img')
+      picture.src = image.url
+      picture.alt = label
+      zoom.append(picture)
+      figure.append(zoom)
+      if (zone) {
+        const detail = document.createElement('div')
+        detail.className = 'draft-closeup'
+        detail.setAttribute('role', 'img')
+        detail.setAttribute('aria-label', `${label}, gros plan`)
+        Object.assign(detail.style, closeUp(image, zone))
+        figure.append(detail)
+      }
+      const caption = document.createElement('figcaption')
+      const title = document.createElement('b')
+      title.textContent = label
+      caption.append(title, `${image.width} × ${image.height} px`)
+      figure.append(caption)
+      grid.append(figure)
+    }
+    $('#draftCompareZone').classList.toggle('hidden', !zone)
+    $('#draftSourceLink').href = source.url
+  }
+
   function paintTexts({ title, shortTitle, descriptionHtml, metaTitle, metaDescription, tags }) {
     const list = $('#draftTexts')
     list.innerHTML = ''
@@ -254,7 +402,9 @@
     if (screen.review && review.classList.contains('hidden')) {
       paintPhotos(view.review.media)
       paintTexts(view.review)
+      if (screen.compare) paintCompare(view.upscale)
     }
+    compare.classList.toggle('hidden', !screen.compare)
     review.classList.toggle('hidden', !screen.review)
     for (const [name, button] of Object.entries(buttons)) {
       button.classList.toggle('hidden', !screen.buttons.includes(name))
@@ -453,6 +603,8 @@
   }
 
   buttons.create.addEventListener('click', () => order('create'))
+  buttons.keep.addEventListener('click', () => order('keep-upscaled'))
+  buttons.original.addEventListener('click', () => order('use-original'))
   buttons.retry.addEventListener('click', () => (run.id ? order('retry') : start()))
   buttons.cancel.addEventListener('click', cancel)
   buttons.close.addEventListener('click', hide)
