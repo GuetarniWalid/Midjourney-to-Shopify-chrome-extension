@@ -14,7 +14,15 @@
 
   const LONG_WAIT_MS = 4 * 60 * 1000
   const KINDS = ['painting', 'poster']
-  const NAMES = { painting: 'Toile', poster: 'Poster' }
+  // Les mots de chaque produit, à un seul endroit.
+  const WORDS = {
+    painting: { name: 'Toile', the: 'la toile', link: 'Voir la toile dans l’admin' },
+    poster: { name: 'Poster', the: 'le poster', link: 'Voir le poster dans l’admin' },
+  }
+  // Une image donne la toile et son poster : les deux sont cochés au départ.
+  const EVERY_PRODUCT = Object.freeze({ painting: true, poster: true })
+
+  const capitalized = (text) => text.charAt(0).toUpperCase() + text.slice(1)
 
   function elapsedLabel(ms) {
     const seconds = Math.floor(ms / 1000)
@@ -96,7 +104,7 @@
       const product = review[kind]
       return {
         kind,
-        name: NAMES[kind],
+        name: WORDS[kind].name,
         available: !!product,
         checked: !!product && !!chosen[kind],
         collection: product ? product.collection.title : null,
@@ -105,17 +113,14 @@
     })
   }
 
+  /** Ce qui partira d'un clic : les produits possibles et cochés. */
+  const keptKinds = (products) =>
+    products.filter(({ available, checked }) => available && checked).map(({ kind }) => kind)
+
   /** Le bouton dit ce qui va partir, et rien ne part sans une case cochée. */
   function createButton(products) {
-    const kept = products.filter(({ available, checked }) => available && checked).map(({ kind }) => kind)
-    const label =
-      kept.length === 2
-        ? 'Publier la toile et le poster'
-        : kept[0] === 'poster'
-          ? 'Publier le poster'
-          : kept[0] === 'painting'
-            ? 'Publier la toile'
-            : 'Publier'
+    const kept = keptKinds(products)
+    const label = kept.length ? `Publier ${kept.map((kind) => WORDS[kind].the).join(' et ')}` : 'Publier'
     return { label, disabled: kept.length === 0 }
   }
 
@@ -131,19 +136,17 @@
 
   function publishedNote(products) {
     if (products.length > 1) {
-      return "La toile et le poster sont en ligne, reliés l'un à l'autre. Leurs tailles et leurs options arrivent d'elles-mêmes d'ici quelques minutes."
+      return "La toile et le poster sont en ligne, reliés l'un à l'autre, avec leurs tailles et leurs options."
     }
-    const which = products[0] && products[0].kind === 'poster' ? 'Le poster est' : 'La toile est'
-    return `${which} en ligne. Ses tailles et ses options arrivent d'elles-mêmes d'ici quelques minutes.`
+    const kind = products[0] ? products[0].kind : 'painting'
+    return `${capitalized(WORDS[kind].the)} est en ligne, avec ses tailles et ses options.`
   }
-
-  const ADMIN_LINKS = { painting: 'Voir la toile dans l’admin', poster: 'Voir le poster dans l’admin' }
 
   /**
    * Ce que montre l'écran pour un état de la préparation. `chosen` : les cases que Walid a laissées
    * cochées. Sans DOM : tests/golden/artwork-draft-screen.js.
    */
-  function draftScreen(view, elapsedMs, { offline = false, chosen = { painting: true, poster: true } } = {}) {
+  function draftScreen(view, elapsedMs, { offline = false, chosen = EVERY_PRODUCT } = {}) {
     const screen = {
       title: '',
       busy: false,
@@ -230,7 +233,9 @@
           ...screen,
           title: 'Publication…',
           busy: true,
-          note: `Shopify reçoit l'image, moins d'une minute en général. Déjà ${elapsedLabel(elapsedMs)}.`,
+          note:
+            "Shopify reçoit l'image, puis chaque produit prend ses tailles et ses options avant d'être mis en vente : " +
+            `une à deux minutes en général. Déjà ${elapsedLabel(elapsedMs)}.`,
         }
       case 'created': {
         const products = view.products || []
@@ -238,7 +243,7 @@
           ...screen,
           title: 'Publié sur la boutique ✓',
           note: publishedNote(products),
-          links: products.map(({ kind, adminUrl }) => ({ label: ADMIN_LINKS[kind], url: adminUrl })),
+          links: products.map(({ kind, adminUrl }) => ({ label: WORDS[kind].link, url: adminUrl })),
           buttons: ['close'],
         }
       }
@@ -295,6 +300,8 @@
   // Ce qui est déjà à l'écran : refait seulement s'il change, pour que le focus n'y saute pas chaque seconde.
   let shownReview = ''
   let shownLinks = ''
+  // Un ordre part : ses boutons restent grisés jusqu'à la réponse, même quand l'écran se repeint.
+  let sending = false
 
   const isWorking = ({ stage }) => stage === 'preparing' || stage === 'creating'
   const isExpired = (res) => res.status === 401 || res.redirected
@@ -492,7 +499,7 @@
     }
     if (screen.create) {
       buttons.create.textContent = screen.create.label
-      buttons.create.disabled = screen.create.disabled
+      buttons.create.disabled = sending || screen.create.disabled
     }
   }
 
@@ -557,7 +564,7 @@
       view: { stage: 'sending' },
       startedAt: Date.now(),
       offline: false,
-      chosen: { painting: true, poster: true },
+      chosen: { ...EVERY_PRODUCT },
     }
     run = current
     show()
@@ -616,6 +623,7 @@
 
   async function order(action, body) {
     const current = run
+    sending = true
     for (const button of Object.values(buttons)) button.disabled = true
     current.startedAt = Date.now()
     try {
@@ -623,6 +631,7 @@
     } catch {
       toast('La connexion a été coupée. Réessayez dans un instant.', 'err')
     } finally {
+      sending = false
       for (const button of Object.values(buttons)) button.disabled = false
       // Le bouton de publication reste grisé sans case cochée.
       if (run === current) paint()
@@ -630,11 +639,7 @@
   }
 
   /** Les produits que Walid a laissés cochés, parmi ceux que l'image donne. */
-  function chosenProducts() {
-    return screenOf(run)
-      .products.filter(({ available, checked }) => available && checked)
-      .map(({ kind }) => kind)
-  }
+  const chosenProducts = () => keptKinds(reviewProducts(run.view.review, run.chosen))
 
   /**
    * false si l'annulation n'a pas pris : trop tard, ou un produit resté à retirer. L'écran reste alors
