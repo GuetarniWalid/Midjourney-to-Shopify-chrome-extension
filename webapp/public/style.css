@@ -479,6 +479,22 @@ select.decor-vibe{appearance:none;-webkit-appearance:none;cursor:pointer;padding
 .draft-texts dd{margin:0 0 var(--s3);font-size:15px;line-height:1.5}
 .draft-texts dd h4{margin:0 0 var(--s2);font-size:16px;font-weight:600}
 .draft-texts dd p{margin:0 0 var(--s2)}
+/* L'œuvre à plat, seule image de la toile et de son poster. */
+.draft-artwork{margin:0 0 var(--s5);display:flex;flex-direction:column;align-items:center;gap:var(--s2)}
+.draft-artwork button{display:block;max-width:100%;padding:0;border:0;background:none;cursor:zoom-in}
+.draft-artwork img{display:block;max-width:100%;max-height:min(50vh,420px);object-fit:contain;border-radius:var(--r-md);border:1px solid var(--border);background:var(--surface-2)}
+.draft-artwork figcaption{font-size:13px;line-height:1.4;color:var(--muted);text-align:center}
+/* Un bloc par produit, sa case en tête : décochée, il n'est pas créé. */
+.draft-products{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:var(--s4);margin-bottom:var(--s3)}
+.draft-product{min-width:0;padding:var(--s4);border:1px solid var(--border-soft);border-radius:var(--r-md)}
+.draft-product-head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2);margin-bottom:var(--s3);font-size:16px;cursor:pointer}
+.draft-product-head input{width:20px;height:20px;margin:0;accent-color:var(--accent)}
+.draft-product-head input:disabled{cursor:not-allowed}
+.draft-product-head span{font-size:14px;color:var(--muted)}
+.draft-product .draft-note{text-align:left}
+.draft-product .draft-texts dd{overflow-wrap:anywhere}
+/* Les liens vers l'admin se rangent avec les boutons. */
+.draft-links{display:contents}
 /* Les boutons restent à portée pendant qu'on lit : la carte a sa marge de --s5, d'où le décalage. */
 .draft-card .resize-actions{position:sticky;bottom:calc(-1 * var(--s5));margin-bottom:calc(-1 * var(--s5));padding:var(--s3) 0 var(--s5);background:var(--surface)}
 .draft-card a.primary-btn{display:block;text-align:center;text-decoration:none}

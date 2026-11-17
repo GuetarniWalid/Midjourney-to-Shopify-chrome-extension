@@ -1,7 +1,8 @@
-/* ===== MyselfMonArt Publisher — une toile sur la nouvelle fiche (fiche produit 3D, ticket 09) =====
-   Second chemin, à choisir en haut de la page. Il n'utilise ni les mockups ni le moteur du PC : le
-   backend rend les photos pendant que Claude écrit les textes, Walid vérifie tout sur un écran, et
-   un clic crée le brouillon. Le chemin des mockups reste le défaut et ne change pas.
+/* ===== MyselfMonArt Publisher — la toile et son poster sur la nouvelle fiche (fiche produit 3D, tickets 09, 14, 16 et 18) =====
+   Le chemin par défaut pour une toile ou un poster à créer. Ni mockups ni moteur du PC : chaque
+   produit n'a qu'une image, l'œuvre à plat. Une image donne la toile et son poster (une image carrée,
+   la toile seule). Claude écrit leurs textes, Walid vérifie tout sur un écran, décoche ce qu'il ne
+   veut pas, et un clic les met en vente. Le chemin des mockups reste à un clic, et ne change pas.
 
    Ticket 16 : une image de moins de 4 000 px est d'abord agrandie pour le site, puis comparée à
    l'originale. Un échec ou un écart se disent ici, et Walid choisit : rien ne se crée sans lui.
@@ -12,6 +13,8 @@
   'use strict'
 
   const LONG_WAIT_MS = 4 * 60 * 1000
+  const KINDS = ['painting', 'poster']
+  const NAMES = { painting: 'Toile', poster: 'Poster' }
 
   function elapsedLabel(ms) {
     const seconds = Math.floor(ms / 1000)
@@ -23,10 +26,7 @@
     if (!upscale) return { state: 'ok', text: 'Assez grande, gardée telle quelle' }
     switch (upscale.state) {
       case 'working':
-        return {
-          state: 'wait',
-          text: 'Votre image est agrandie pour le site, environ 30 secondes. Les photos suivent.',
-        }
+        return { state: 'wait', text: 'Votre image est agrandie pour le site, environ 30 secondes.' }
       case 'failed':
         return { state: 'err', text: "N'a pas pu être agrandie" }
       case 'checking':
@@ -42,44 +42,20 @@
     }
   }
 
-  function photosStep({ status, studioBusy, ahead, attempts }, upscale) {
-    if (status === 'waiting') {
-      if (upscale && upscale.state === 'failed') return { state: 'wait', text: 'Attendent votre choix.' }
-      if (upscale && upscale.state === 'checking') {
-        return { state: 'wait', text: 'Attendent la fin de la comparaison, puis environ 45 secondes.' }
-      }
-      return { state: 'wait', text: "Attendent l'image agrandie, puis environ 45 secondes." }
-    }
-    if (status === 'done') return { state: 'ok', text: 'Prêtes' }
-    if (status === 'failed') return { state: 'err', text: "N'ont pas pu être préparées" }
-    if (status === 'rendering') {
-      return {
-        state: 'wait',
-        text: attempts
-          ? 'Nouvel essai en cours, environ 45 secondes…'
-          : 'Prise de vue en cours, environ 45 secondes…',
-      }
-    }
-    if (studioBusy) {
-      return {
-        state: 'wait',
-        text: "En pause : une cliente crée son poster personnalisé, elle passe d'abord. Les photos reprennent toutes seules.",
-      }
-    }
-    if (ahead === 1) return { state: 'wait', text: 'Une autre œuvre passe avant, puis ce sera la vôtre.' }
-    if (ahead > 1) return { state: 'wait', text: `${ahead} autres œuvres passent avant, puis ce sera la vôtre.` }
-    return { state: 'wait', text: 'Démarrage dans quelques secondes…' }
-  }
-
-  function textsStep(texts) {
+  function textsStep(texts, ratio) {
     if (texts === 'done') return { state: 'ok', text: 'Prêts' }
     if (texts === 'failed') return { state: 'err', text: "N'ont pas pu être écrits" }
-    return { state: 'wait', text: 'Claude écrit le titre, la description et les textes des images…' }
+    return {
+      state: 'wait',
+      text:
+        ratio === 'square'
+          ? "Claude écrit le titre, la description et le texte de l'image de la toile…"
+          : 'Claude écrit les textes de la toile, puis ceux de son poster…',
+    }
   }
 
   const FAILED_TITLES = {
     upscale: "L'image n'a pas pu être agrandie",
-    photos: "Les photos n'ont pas pu être préparées",
     texts: "Les textes n'ont pas pu être écrits",
   }
 
@@ -98,10 +74,7 @@
     const seen = reasons.length
       ? `L'agrandissement s'écarte de votre image : ${inWords(reasons.map((reason) => UPSCALE_REASONS[reason]))}.`
       : "La comparaison automatique avec votre image n'a pas pu se faire."
-    return (
-      `${seen} Comparez les deux versions ci-dessous, puis choisissez. Rien ne sera créé sans votre accord. ` +
-      "Avec votre image d'origine, les photos se refont : environ 45 secondes."
-    )
+    return `${seen} Comparez les deux versions ci-dessous, puis choisissez. Rien ne sera créé sans votre accord.`
   }
 
   function upscaleFailure({ noCredit }) {
@@ -110,8 +83,67 @@
       : "Rien n'est perdu : votre image est gardée telle quelle. Vous pouvez réessayer, ou continuer avec elle."
   }
 
-  /** Ce que montre l'écran pour un état du brouillon. Sans DOM : tests/golden/artwork-draft-screen.js. */
-  function draftScreen(view, elapsedMs, { offline = false } = {}) {
+  function missingPoster({ painting, posterMissing }) {
+    return posterMissing === 'square'
+      ? 'Pas de poster pour une image carrée : la boutique ne vend pas de poster carré.'
+      : `Pas de poster : « ${painting.collection.title} » n'a pas encore de collection poster. ` +
+          "Créez-la sur la boutique, ou demandez à Claude de l'ajouter à la table des correspondances."
+  }
+
+  /** Les produits que l'image donne, cochés ou non : un poster impossible ne se coche jamais. */
+  function reviewProducts(review, chosen) {
+    return KINDS.map((kind) => {
+      const product = review[kind]
+      return {
+        kind,
+        name: NAMES[kind],
+        available: !!product,
+        checked: !!product && !!chosen[kind],
+        collection: product ? product.collection.title : null,
+        note: product ? null : missingPoster(review),
+      }
+    })
+  }
+
+  /** Le bouton dit ce qui va partir, et rien ne part sans une case cochée. */
+  function createButton(products) {
+    const kept = products.filter(({ available, checked }) => available && checked).map(({ kind }) => kind)
+    const label =
+      kept.length === 2
+        ? 'Publier la toile et le poster'
+        : kept[0] === 'poster'
+          ? 'Publier le poster'
+          : kept[0] === 'painting'
+            ? 'Publier la toile'
+            : 'Publier'
+    return { label, disabled: kept.length === 0 }
+  }
+
+  function creationFailure(leftovers) {
+    if (leftovers.length > 1) {
+      return "Des produits incomplets sont restés sur la boutique : ils seront retirés au prochain essai. Sinon, supprimez-les dans l'admin."
+    }
+    if (leftovers.length) {
+      return "Un produit incomplet est resté sur la boutique : il sera retiré au prochain essai. Sinon, supprimez-le dans l'admin."
+    }
+    return "Rien n'est resté sur la boutique. Vous pouvez réessayer, ou passer par les mockups."
+  }
+
+  function publishedNote(products) {
+    if (products.length > 1) {
+      return "La toile et le poster sont en ligne, reliés l'un à l'autre. Leurs tailles et leurs options arrivent d'elles-mêmes d'ici quelques minutes."
+    }
+    const which = products[0] && products[0].kind === 'poster' ? 'Le poster est' : 'La toile est'
+    return `${which} en ligne. Ses tailles et ses options arrivent d'elles-mêmes d'ici quelques minutes.`
+  }
+
+  const ADMIN_LINKS = { painting: 'Voir la toile dans l’admin', poster: 'Voir le poster dans l’admin' }
+
+  /**
+   * Ce que montre l'écran pour un état de la préparation. `chosen` : les cases que Walid a laissées
+   * cochées. Sans DOM : tests/golden/artwork-draft-screen.js.
+   */
+  function draftScreen(view, elapsedMs, { offline = false, chosen = { painting: true, poster: true } } = {}) {
     const screen = {
       title: '',
       busy: false,
@@ -120,20 +152,22 @@
       problem: null,
       review: false,
       compare: false,
+      products: [],
+      create: null,
+      links: [],
       buttons: [],
     }
     const upscale = view.upscale || null
     const steps = () => [
       { name: 'Image', ...imageStep(upscale) },
-      { name: 'Photos', ...photosStep(view.photos, upscale) },
-      { name: 'Textes', ...textsStep(view.texts) },
+      { name: 'Textes', ...textsStep(view.texts, view.ratio) },
     ]
     // Les deux images côte à côte, tant que c'est l'agrandie qui part sur la fiche.
     const compare = !!(upscale && upscale.upscaled && upscale.state !== 'original')
 
     switch (view.stage) {
       case 'sending':
-        return { ...screen, title: 'Préparation de la toile', busy: true, note: "Envoi de l'image…" }
+        return { ...screen, title: 'Préparation de la fiche', busy: true, note: "Envoi de l'image…" }
       case 'unsent':
         return {
           ...screen,
@@ -160,7 +194,7 @@
         }
         return {
           ...screen,
-          title: FAILED_TITLES[view.problem],
+          title: FAILED_TITLES[view.problem] || FAILED_TITLES.texts,
           steps: steps(),
           problem: "Rien n'a été créé. Vous pouvez réessayer, ou passer par les mockups avec la même image.",
           buttons: ['retry', 'mockups', 'cancel'],
@@ -172,57 +206,55 @@
           problem: upscaleAlert(upscale),
           review: true,
           compare,
+          products: reviewProducts(view.review, chosen),
           buttons: ['keep', 'original', 'cancel'],
         }
       case 'ready': {
-        const created = view.problem === 'creation'
+        const failed = view.problem === 'creation'
+        const leftovers = view.leftoverUrls || []
+        const products = reviewProducts(view.review, chosen)
         return {
           ...screen,
-          title: created ? "Le brouillon n'a pas pu être créé" : 'À vérifier avant de créer le brouillon',
-          problem: !created
-            ? null
-            : view.leftoverUrl
-              ? "Un brouillon incomplet est resté sur la boutique : il sera retiré au prochain essai. Sinon, supprimez-le dans l'admin."
-              : "Rien n'est resté sur la boutique. Vous pouvez réessayer, ou passer par les mockups.",
+          title: failed ? "La publication n'a pas pu se faire" : 'À vérifier avant de publier',
+          problem: failed ? creationFailure(leftovers) : null,
           review: true,
           compare,
-          buttons: !created
-            ? ['create', 'cancel']
-            : view.leftoverUrl
-              ? ['create', 'link', 'mockups', 'cancel']
-              : ['create', 'mockups', 'cancel'],
+          products,
+          create: createButton(products),
+          links: leftovers.map((url) => ({ label: 'Voir le produit resté dans l’admin', url })),
+          buttons: failed ? ['create', 'mockups', 'cancel'] : ['create', 'cancel'],
         }
       }
       case 'creating':
         return {
           ...screen,
-          title: 'Création du brouillon…',
+          title: 'Publication…',
           busy: true,
-          note: `Shopify reçoit les photos, moins d'une minute en général. Déjà ${elapsedLabel(elapsedMs)}.`,
+          note: `Shopify reçoit l'image, moins d'une minute en général. Déjà ${elapsedLabel(elapsedMs)}.`,
         }
-      case 'created':
+      case 'created': {
+        const products = view.products || []
         return {
           ...screen,
-          title: 'Brouillon créé ✓',
-          note:
-            "Il n'est pas encore en ligne. Pour le mettre en vente : ouvrez-le dans l'admin, passez-le en Actif et cochez Boutique en ligne. " +
-            "Ses tailles et ses options arrivent d'elles-mêmes d'ici quelques minutes.",
-          buttons: ['link', 'close'],
+          title: 'Publié sur la boutique ✓',
+          note: publishedNote(products),
+          links: products.map(({ kind, adminUrl }) => ({ label: ADMIN_LINKS[kind], url: adminUrl })),
+          buttons: ['close'],
         }
+      }
       default: {
         const slow = elapsedMs >= LONG_WAIT_MS
         const elapsed = `Déjà ${elapsedLabel(elapsedMs)}.`
-        const longer = upscale && upscale.state !== 'original' ? " Avec l'agrandissement, comptez deux minutes environ." : ''
         return {
           ...screen,
-          title: 'Préparation de la toile',
+          title: 'Préparation de la fiche',
           busy: true,
           steps: steps(),
           note: offline
-            ? 'Connexion interrompue, nouvel essai en cours… Votre toile continue de se préparer.'
+            ? 'Connexion interrompue, nouvel essai en cours… Votre fiche continue de se préparer.'
             : slow
               ? `${elapsed} C'est plus long que d'habitude. Vous pouvez continuer à attendre, ou annuler.`
-              : `${elapsed}${longer} Rien n'est bloqué, vous pouvez attendre ici.`,
+              : `${elapsed} Rien n'est bloqué, vous pouvez attendre ici.`,
           buttons: ['cancel'],
         }
       }
@@ -238,35 +270,39 @@
   const SEND_TIMEOUT_MS = 180000 // une grande image sur une connexion de téléphone
   const CALL_TIMEOUT_MS = 20000
   const HEADERS = { 'Content-Type': 'application/json', Accept: 'application/json' }
-  const PHOTO_LABELS = {
-    'face': 'De face',
-    'oeuvre': "L'image à plat",
-    'trois-quarts': 'De trois-quarts',
-    'matiere': 'La matière',
-    'coin': 'Le coin du cadre',
-  }
 
   const overlay = $('#draftOverlay')
   const review = $('#draftReview')
   const compare = $('#draftCompare')
+  const links = $('#draftLinks')
   const buttons = {
     create: $('#draftCreate'),
     keep: $('#draftKeep'),
     original: $('#draftOriginal'),
     retry: $('#draftRetry'),
-    link: $('#draftLink'),
     mockups: $('#draftMockups'),
     cancel: $('#draftCancel'),
     close: $('#draftClose'),
   }
 
-  let active = false // ce chemin est choisi. Toujours faux au chargement : les mockups restent le défaut.
-  let run = null // la préparation à l'écran : { id, image, view, startedAt, offline }
-  let createdImage = null // l'image du dernier brouillon créé : le bouton ne la reprend pas deux fois
+  // Ce chemin est choisi. Par défaut pour une toile ou un poster à créer ; jamais en reimage ni pour
+  // un poster personnalisé, qui gardent leur chemin.
+  let active = MODE === 'create'
+  // La préparation à l'écran : { id, image, view, startedAt, offline, chosen }
+  let run = null
+  let createdImage = null // l'image des derniers produits créés : le bouton ne la reprend pas deux fois
   let ticker = null
+  // Ce qui est déjà à l'écran : refait seulement s'il change, pour que le focus n'y saute pas chaque seconde.
+  let shownReview = ''
+  let shownLinks = ''
 
   const isWorking = ({ stage }) => stage === 'preparing' || stage === 'creating'
   const isExpired = (res) => res.status === 401 || res.redirected
+  const screenOf = (current) =>
+    draftScreen(current.view, Date.now() - current.startedAt, {
+      offline: current.offline,
+      chosen: current.chosen,
+    })
 
   /* ---------- Affichage ---------- */
 
@@ -292,30 +328,73 @@
     })
   }
 
-  function paintPhotos(media) {
-    const grid = $('#draftPhotos')
-    grid.innerHTML = ''
-    media.forEach(({ photo, url, alt, filename }, index) => {
-      const figure = document.createElement('figure')
-      figure.className = 'draft-photo'
-      const zoom = document.createElement('button')
-      zoom.type = 'button'
-      zoom.title = 'Agrandir'
-      zoom.addEventListener('click', () => openLightbox(url))
-      const image = document.createElement('img')
-      image.src = url
-      image.alt = alt
-      image.loading = 'lazy'
-      zoom.append(image)
-      const caption = document.createElement('figcaption')
+  /** L'œuvre à plat : la seule image de chaque produit. */
+  function paintArtwork({ painting }) {
+    const zoom = $('#draftArtwork button')
+    zoom.onclick = () => openLightbox(painting.image)
+    const image = $('#draftArtwork img')
+    image.src = painting.image
+    image.alt = painting.media.alt
+  }
+
+  function paintTexts(list, { title, shortTitle, descriptionHtml, metaTitle, metaDescription, tags, media }) {
+    const add = (label, ...content) => {
+      const term = document.createElement('dt')
+      term.textContent = label
+      const value = document.createElement('dd')
+      value.append(...content)
+      list.append(term, value)
+    }
+    add('Titre', title)
+    add('Titre court', shortTitle)
+    add('Description', ...descriptionBlocks(descriptionHtml))
+    add('Titre pour Google', metaTitle)
+    add('Description pour Google', metaDescription)
+    add('Mots-clés', tags.join(', '))
+    add("Texte de l'image", media.alt)
+    add('Nom du fichier', media.filename)
+  }
+
+  /** Un bloc par produit, avec sa case : décochée, il ne sera pas créé. */
+  function paintProducts(draftReview, products) {
+    const blocks = $('#draftProducts')
+    blocks.innerHTML = ''
+    for (const { kind, name, available, checked, collection, note } of products) {
+      const block = document.createElement('section')
+      block.className = 'draft-product'
+      const head = document.createElement('label')
+      head.className = 'draft-product-head'
+      const box = document.createElement('input')
+      box.type = 'checkbox'
+      box.checked = checked
+      box.disabled = !available
+      box.addEventListener('change', () => {
+        run.chosen[kind] = box.checked
+        paint()
+      })
       const title = document.createElement('b')
-      title.textContent = `${index + 1} · ${PHOTO_LABELS[photo] || photo}`
-      const name = document.createElement('small')
-      name.textContent = filename
-      caption.append(title, alt, name)
-      figure.append(zoom, caption)
-      grid.append(figure)
-    })
+      title.textContent = name
+      head.append(box, title)
+      if (collection) {
+        const where = document.createElement('span')
+        where.textContent = collection
+        // L'espace sépare les deux mots pour un lecteur d'écran ; à l'œil, c'est l'écart de la ligne.
+        head.append(' ', where)
+      }
+      block.append(head)
+      if (note) {
+        const missing = document.createElement('p')
+        missing.className = 'draft-note'
+        missing.textContent = note
+        block.append(missing)
+      } else {
+        const list = document.createElement('dl')
+        list.className = 'draft-texts'
+        paintTexts(list, draftReview[kind])
+        block.append(list)
+      }
+      blocks.append(block)
+    }
   }
 
   /** Un carré de 15 % de la largeur, centré sur la zone qui a le plus changé et gardé dans l'image. */
@@ -369,27 +448,25 @@
     $('#draftSourceLink').href = source.url
   }
 
-  function paintTexts({ title, shortTitle, descriptionHtml, metaTitle, metaDescription, tags }) {
-    const list = $('#draftTexts')
-    list.innerHTML = ''
-    const add = (label, ...content) => {
-      const term = document.createElement('dt')
-      term.textContent = label
-      const value = document.createElement('dd')
-      value.append(...content)
-      list.append(term, value)
+  function paintLinks(screenLinks) {
+    const key = JSON.stringify(screenLinks)
+    if (key === shownLinks) return
+    shownLinks = key
+    links.innerHTML = ''
+    for (const { label, url } of screenLinks) {
+      const link = document.createElement('a')
+      link.className = 'primary-btn'
+      link.target = '_blank'
+      link.rel = 'noopener'
+      link.href = url
+      link.textContent = label
+      links.append(link)
     }
-    add('Titre', title)
-    add('Titre court', shortTitle)
-    add('Description', ...descriptionBlocks(descriptionHtml))
-    add('Titre pour Google', metaTitle)
-    add('Description pour Google', metaDescription)
-    add('Mots-clés', tags.join(', '))
   }
 
   function paint() {
-    const { view, startedAt, offline } = run
-    const screen = draftScreen(view, Date.now() - startedAt, { offline })
+    const { view } = run
+    const screen = screenOf(run)
     $('#draftTitle').textContent = screen.title
     $('#draftSpinner').classList.toggle('hidden', !screen.busy)
     paintSteps(screen.steps)
@@ -399,24 +476,32 @@
     const problem = $('#draftProblem')
     problem.textContent = screen.problem || ''
     problem.classList.toggle('hidden', !screen.problem)
-    if (screen.review && review.classList.contains('hidden')) {
-      paintPhotos(view.review.media)
-      paintTexts(view.review)
+    // Refait quand ce qu'il montre change : son image d'origine gardée, Walid la voit aussitôt.
+    const reviewKey = screen.review ? JSON.stringify([view.review, screen.compare]) : ''
+    if (reviewKey && reviewKey !== shownReview) {
+      paintArtwork(view.review)
+      paintProducts(view.review, screen.products)
       if (screen.compare) paintCompare(view.upscale)
     }
+    shownReview = reviewKey
     compare.classList.toggle('hidden', !screen.compare)
     review.classList.toggle('hidden', !screen.review)
+    paintLinks(screen.links)
     for (const [name, button] of Object.entries(buttons)) {
       button.classList.toggle('hidden', !screen.buttons.includes(name))
     }
-    const adminUrl = view.product ? view.product.adminUrl : view.leftoverUrl
-    if (adminUrl) buttons.link.href = adminUrl
+    if (screen.create) {
+      buttons.create.textContent = screen.create.label
+      buttons.create.disabled = screen.create.disabled
+    }
   }
 
   function show() {
     overlay.classList.remove('hidden')
     document.body.classList.add('draft-open')
     review.classList.add('hidden')
+    shownReview = ''
+    shownLinks = ''
     clearInterval(ticker)
     // Chaque seconde, même sans nouvelle du serveur : l'écran ne doit jamais sembler figé.
     ticker = setInterval(paint, 1000)
@@ -466,7 +551,14 @@
 
   async function start() {
     const image = state.imageDataUrl
-    const current = { id: null, image, view: { stage: 'sending' }, startedAt: Date.now(), offline: false }
+    const current = {
+      id: null,
+      image,
+      view: { stage: 'sending' },
+      startedAt: Date.now(),
+      offline: false,
+      chosen: { painting: true, poster: true },
+    }
     run = current
     show()
     try {
@@ -505,10 +597,10 @@
   }
 
   /** Un ordre au backend. Sa réponse est le nouvel état, et le suivi reprend s'il y a du travail. */
-  async function send(current, action) {
+  async function send(current, action, body) {
     const { res, data } = await fetchJsonT(
       `${API}/api/artwork-drafts/${current.id}/${action}`,
-      { method: 'POST', headers: HEADERS },
+      { method: 'POST', headers: HEADERS, ...(body ? { body: JSON.stringify(body) } : {}) },
       CALL_TIMEOUT_MS
     )
     if (isExpired(res)) {
@@ -522,22 +614,31 @@
     return data.data
   }
 
-  async function order(action) {
+  async function order(action, body) {
     const current = run
     for (const button of Object.values(buttons)) button.disabled = true
     current.startedAt = Date.now()
     try {
-      await send(current, action)
+      await send(current, action, body)
     } catch {
       toast('La connexion a été coupée. Réessayez dans un instant.', 'err')
     } finally {
       for (const button of Object.values(buttons)) button.disabled = false
+      // Le bouton de publication reste grisé sans case cochée.
+      if (run === current) paint()
     }
+  }
+
+  /** Les produits que Walid a laissés cochés, parmi ceux que l'image donne. */
+  function chosenProducts() {
+    return screenOf(run)
+      .products.filter(({ available, checked }) => available && checked)
+      .map(({ kind }) => kind)
   }
 
   /**
    * false si l'annulation n'a pas pris : trop tard, ou un produit resté à retirer. L'écran reste alors
-   * ouvert, sur le nouvel état. Sans réponse, il se ferme : rien ne se crée sans le clic de validation.
+   * ouvert, sur le nouvel état. Sans réponse, il se ferme : rien ne se crée sans le clic de publication.
    */
   async function cancel() {
     const current = run
@@ -555,6 +656,19 @@
 
   /* ---------- Choix du chemin ---------- */
 
+  /** Montre les cartes du chemin choisi : la nouvelle fiche, ou les mockups et leurs rendus. */
+  function applyPath() {
+    $$('#draftChoice .seg-btn').forEach((button) => {
+      button.classList.toggle('active', (button.dataset.path === 'draft') === active)
+    })
+    $('#draftChoiceNote').classList.toggle('hidden', !active)
+    $('#draftCard').classList.toggle('hidden', !active)
+    for (const id of ['#productType', '#mockupsCard', '#resultsCard']) {
+      $(id).classList.toggle('hidden', active)
+    }
+    if (!active) $('#publishBtn').textContent = "Publier l'œuvre"
+  }
+
   function choose(next) {
     if (next === active) return
     if (next) {
@@ -567,15 +681,10 @@
       state.lastBatchImage = null
     }
     active = next
-    $$('#draftChoice .seg-btn').forEach((button) => {
-      button.classList.toggle('active', (button.dataset.path === 'draft') === active)
-    })
-    $('#draftChoiceNote').classList.toggle('hidden', !active)
-    $('#draftCard').classList.toggle('hidden', !active)
-    for (const id of ['#productType', '#mockupsCard', '#resultsCard']) {
-      $(id).classList.toggle('hidden', active)
-    }
-    if (!active) $('#publishBtn').textContent = "Publier l'œuvre"
+    // La nouvelle fiche part de la collection de la toile ; le poster prend celle des posters de son
+    // thème. Choisie depuis « Poster », elle revient donc aux collections de toiles.
+    if (active && state.productType !== 'toile') $('#productType .seg-btn[data-type="toile"]').click()
+    applyPath()
     refreshAction()
     if (!active) maybeRunFavorites()
   }
@@ -583,26 +692,26 @@
   function refreshDraftAction() {
     const info = $('#actionInfo')
     const button = $('#publishBtn')
-    button.textContent = 'Préparer les photos'
+    button.textContent = 'Préparer la fiche'
     if (state.needsResize) {
       info.textContent = "⚠️ Retaille l'image au bon format pour continuer"
       button.disabled = true
       return
     }
     if (state.imageDataUrl && state.imageDataUrl === createdImage) {
-      info.textContent = 'Brouillon déjà créé pour cette image'
+      info.textContent = 'Déjà publiée pour cette image'
       button.disabled = true
       return
     }
     const parts = []
     if (state.orientation) parts.push(labelOri(state.orientation))
     if (state.collection) parts.push(state.collection.title)
-    parts.push('Nouvelle fiche')
+    parts.push(state.orientation === 'square' ? 'Toile sur la nouvelle fiche' : 'Toile et poster sur la nouvelle fiche')
     info.textContent = parts.join(' · ')
     button.disabled = !(state.imageDataUrl && state.collection)
   }
 
-  buttons.create.addEventListener('click', () => order('create'))
+  buttons.create.addEventListener('click', () => order('create', { products: chosenProducts() }))
   buttons.keep.addEventListener('click', () => order('keep-upscaled'))
   buttons.original.addEventListener('click', () => order('use-original'))
   buttons.retry.addEventListener('click', () => (run.id ? order('retry') : start()))
@@ -618,13 +727,18 @@
   window.ArtworkDraftMode = {
     active: () => active,
     start,
-    /** true : ce chemin a pris la barre d'action. Le choix ne se montre que pour une toile à créer. */
+    /** true : ce chemin a pris la barre d'action. Le choix ne se montre que pour une toile ou un poster à créer. */
     refreshAction() {
-      $('#draftChoice').classList.toggle('hidden', state.productType !== 'toile' || !!state.jumeau)
+      const covered =
+        MODE === 'create' && !state.jumeau && (state.productType === 'toile' || state.productType === 'poster')
+      $('#draftChoice').classList.toggle('hidden', !covered)
       if (active) refreshDraftAction()
       return active
     },
   }
 
-  if (MODE === 'create') refreshAction()
+  if (MODE === 'create') {
+    applyPath()
+    refreshAction()
+  }
 })()
