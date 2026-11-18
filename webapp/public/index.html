@@ -43,15 +43,15 @@
     <!-- 1. Upload -->
     <section class="card" id="uploadCard">
       <h2 class="card-title">1 · Votre image</h2>
-      <!-- Chemin d'une toile ou d'un poster : nouvelle fiche (défaut) ou mockups. Avant l'image, parce
-           que l'image lance les mockups favoris. Révélé par artwork-draft.js, pour une toile ou un
-           poster à créer seulement. -->
+      <!-- Le produit à créer : la toile et son poster sur la nouvelle fiche (défaut), ou une tapisserie,
+           seule à passer encore par les mockups. Avant l'image, parce que l'image lance les mockups
+           favoris de la tapisserie. Révélé par artwork-draft.js, en création seulement. -->
       <div id="draftChoice" class="draft-choice hidden">
-        <div class="seg" role="group" aria-label="Chemin du produit">
-          <button class="seg-btn" data-path="mockups">Mockups</button>
-          <button class="seg-btn active" data-path="draft">Nouvelle fiche</button>
+        <div class="seg" role="group" aria-label="Produit à créer">
+          <button class="seg-btn active" data-path="draft">Toile et poster</button>
+          <button class="seg-btn" data-path="tapisserie">Tapisserie</button>
         </div>
-        <p id="draftChoiceNote" class="draft-note hidden">La toile et son poster, mis en vente sur la nouvelle fiche avec votre image seule. Pas de mockups. Une tapisserie passe par « Mockups ».</p>
+        <p id="draftChoiceNote" class="draft-note hidden">La toile et son poster, mis en vente sur la nouvelle fiche avec votre image seule. Pas de mockups.</p>
       </div>
       <label id="dropzone" class="dropzone" for="fileInput">
         <input type="file" id="fileInput" accept="image/*" hidden>
@@ -75,6 +75,8 @@
     <section class="card" id="paramsCard">
       <h2 class="card-title">2 · Produit & collection</h2>
 
+      <!-- Pour le mode reimage (produit sans type) et le poster personnalisé. En création, le produit
+           se choisit au-dessus de l'image, et ce sélecteur reste caché (artwork-draft.js). -->
       <div class="seg" id="productType">
         <button class="seg-btn active" data-type="toile">Toile</button>
         <button class="seg-btn" data-type="poster">Poster</button>
@@ -375,7 +377,6 @@
         <button id="draftOriginal" class="primary-btn hidden">Garder mon image d'origine</button>
         <button id="draftRetry" class="primary-btn hidden">Réessayer</button>
         <div id="draftLinks" class="draft-links"></div>
-        <button id="draftMockups" class="ghost-btn hidden">Passer par les mockups</button>
         <button id="draftCancel" class="ghost-btn hidden">Annuler</button>
         <button id="draftClose" class="ghost-btn hidden">Fermer</button>
       </div>

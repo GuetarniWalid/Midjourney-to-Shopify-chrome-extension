@@ -61,10 +61,12 @@ par le backend via `window.PUBLISHER_CONFIG.mode` (ou `?mode=…` en local sur l
   par metafields). Logique dédiée dans `public/personalized.js` (chargé après `app.js`, même scope) ;
   `app.js` ne porte que les points de branchement (`IS_PERSONALIZED`).
 
-En mode **create**, une toile a un second chemin, à choisir en haut de la page : **Nouvelle fiche**.
-Pas de mockups ni de moteur du PC : le backend rend les photos, Claude écrit les textes, un écran
-montre le tout, et un clic crée le brouillon (`/api/artwork-drafts`, voir `App/Services/ArtworkDraft`
-du backend). Logique dans `public/artwork-draft.js`. Les mockups restent le défaut.
+En mode **create**, le produit se choisit en haut de la page. **Toile et poster** (le défaut) est le
+seul chemin d'une toile ou d'un poster neufs, sur la nouvelle fiche : pas de mockups ni de moteur du
+PC, l'image donne la toile et son poster, Claude écrit les textes, un écran montre le tout, et un clic
+les met en vente (`/api/artwork-drafts`, voir `App/Services/ArtworkDraft` du backend). Logique dans
+`public/artwork-draft.js`. **Tapisserie** passe encore par les mockups, comme les modes reimage et
+personalized.
 
 ### Poster personnalisé (mode `personalized`)
 

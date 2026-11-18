@@ -1,8 +1,9 @@
 /* ===== MyselfMonArt Publisher — la toile et son poster sur la nouvelle fiche (fiche produit 3D, tickets 09, 14, 16 et 18) =====
-   Le chemin par défaut pour une toile ou un poster à créer. Ni mockups ni moteur du PC : chaque
-   produit n'a qu'une image, l'œuvre à plat. Une image donne la toile et son poster (une image carrée,
-   la toile seule). Claude écrit leurs textes, Walid vérifie tout sur un écran, décoche ce qu'il ne
-   veut pas, et un clic les met en vente. Le chemin des mockups reste à un clic, et ne change pas.
+   Le seul chemin pour une toile ou un poster à créer. Ni mockups ni moteur du PC : chaque produit
+   n'a qu'une image, l'œuvre à plat. Une image donne la toile et son poster (une image carrée, la
+   toile seule). Claude écrit leurs textes, Walid vérifie tout sur un écran, décoche ce qu'il ne veut
+   pas, et un clic les met en vente. L'autre choix au-dessus de l'image, la tapisserie, garde les
+   mockups (décision de Walid du 17/11/2026 : toiles et posters neufs sur la fiche 3D seulement).
 
    Ticket 16 : une image de moins de 4 000 px est d'abord agrandie pour le site, puis comparée à
    l'originale. Un échec ou un écart se disent ici, et Walid choisit : rien ne se crée sans lui.
@@ -131,7 +132,7 @@
     if (leftovers.length) {
       return "Un produit incomplet est resté sur la boutique : il sera retiré au prochain essai. Sinon, supprimez-le dans l'admin."
     }
-    return "Rien n'est resté sur la boutique. Vous pouvez réessayer, ou passer par les mockups."
+    return "Rien n'est resté sur la boutique. Vous pouvez réessayer."
   }
 
   function publishedNote(products) {
@@ -176,7 +177,7 @@
           ...screen,
           title: "L'image n'est pas partie",
           problem: `${view.message} Rien n'a été créé.`,
-          buttons: ['retry', 'mockups', 'close'],
+          buttons: ['retry', 'close'],
         }
       case 'expired':
         return {
@@ -192,15 +193,15 @@
             title: FAILED_TITLES.upscale,
             steps: steps(),
             problem: upscaleFailure(upscale),
-            buttons: ['original', 'retry', 'mockups', 'cancel'],
+            buttons: ['original', 'retry', 'cancel'],
           }
         }
         return {
           ...screen,
           title: FAILED_TITLES[view.problem] || FAILED_TITLES.texts,
           steps: steps(),
-          problem: "Rien n'a été créé. Vous pouvez réessayer, ou passer par les mockups avec la même image.",
-          buttons: ['retry', 'mockups', 'cancel'],
+          problem: "Rien n'a été créé. Vous pouvez réessayer.",
+          buttons: ['retry', 'cancel'],
         }
       case 'deciding':
         return {
@@ -225,7 +226,7 @@
           products,
           create: createButton(products),
           links: leftovers.map((url) => ({ label: 'Voir le produit resté dans l’admin', url })),
-          buttons: failed ? ['create', 'mockups', 'cancel'] : ['create', 'cancel'],
+          buttons: ['create', 'cancel'],
         }
       }
       case 'creating':
@@ -285,13 +286,12 @@
     keep: $('#draftKeep'),
     original: $('#draftOriginal'),
     retry: $('#draftRetry'),
-    mockups: $('#draftMockups'),
     cancel: $('#draftCancel'),
     close: $('#draftClose'),
   }
 
-  // Ce chemin est choisi. Par défaut pour une toile ou un poster à créer ; jamais en reimage ni pour
-  // un poster personnalisé, qui gardent leur chemin.
+  // Ce chemin est choisi : en création, sauf pour une tapisserie. Jamais en reimage ni pour un poster
+  // personnalisé, qui gardent leur chemin.
   let active = MODE === 'create'
   // La préparation à l'écran : { id, image, view, startedAt, offline, chosen }
   let run = null
@@ -642,35 +642,32 @@
   const chosenProducts = () => keptKinds(reviewProducts(run.view.review, run.chosen))
 
   /**
-   * false si l'annulation n'a pas pris : trop tard, ou un produit resté à retirer. L'écran reste alors
-   * ouvert, sur le nouvel état. Sans réponse, il se ferme : rien ne se crée sans le clic de publication.
+   * Une annulation qui ne prend pas (trop tard, ou un produit resté à retirer) laisse l'écran ouvert,
+   * sur le nouvel état. Sans réponse, il se ferme : rien ne se crée sans le clic de publication.
    */
   async function cancel() {
     const current = run
     if (current.id) {
       try {
         const { stage } = await send(current, 'cancel')
-        if (stage !== 'cancelled') return false
+        if (stage !== 'cancelled') return
       } catch {
         // Voir au-dessus.
       }
     }
     hide()
-    return true
   }
 
-  /* ---------- Choix du chemin ---------- */
+  /* ---------- Choix du produit : la toile et son poster, ou une tapisserie ---------- */
 
-  /** Montre les cartes du chemin choisi : la nouvelle fiche, ou les mockups et leurs rendus. */
+  /** Montre les cartes du produit choisi : la nouvelle fiche, ou les mockups de la tapisserie. */
   function applyPath() {
     $$('#draftChoice .seg-btn').forEach((button) => {
       button.classList.toggle('active', (button.dataset.path === 'draft') === active)
     })
     $('#draftChoiceNote').classList.toggle('hidden', !active)
     $('#draftCard').classList.toggle('hidden', !active)
-    for (const id of ['#productType', '#mockupsCard', '#resultsCard']) {
-      $(id).classList.toggle('hidden', active)
-    }
+    for (const id of ['#mockupsCard', '#resultsCard']) $(id).classList.toggle('hidden', active)
     if (!active) $('#publishBtn').textContent = "Publier l'œuvre"
   }
 
@@ -679,19 +676,18 @@
     if (next) {
       if (
         state.results.length &&
-        !confirm('Passer à la nouvelle fiche va effacer les rendus déjà générés. Continuer ?')
+        !confirm('Passer à la toile et son poster va effacer les rendus de la tapisserie. Continuer ?')
       )
         return
       clearResults() // arrête aussi un lot de favoris en cours : ni Photopea ni Gemini sur ce chemin
-      state.lastBatchImage = null
     }
     active = next
-    // La nouvelle fiche part de la collection de la toile ; le poster prend celle des posters de son
-    // thème. Choisie depuis « Poster », elle revient donc aux collections de toiles.
-    if (active && state.productType !== 'toile') $('#productType .seg-btn[data-type="toile"]').click()
+    // Le type suit, par le sélecteur caché de app.js : il vide la collection, recharge collections et
+    // mockups, puis lance les favoris d'une tapisserie. La nouvelle fiche part de la collection de la
+    // toile ; le poster prend celle des posters de son thème.
+    $(`#productType .seg-btn[data-type="${active ? 'toile' : 'tapisserie'}"]`).click()
     applyPath()
     refreshAction()
-    if (!active) maybeRunFavorites()
   }
 
   function refreshDraftAction() {
@@ -722,9 +718,6 @@
   buttons.retry.addEventListener('click', () => (run.id ? order('retry') : start()))
   buttons.cancel.addEventListener('click', cancel)
   buttons.close.addEventListener('click', hide)
-  buttons.mockups.addEventListener('click', async () => {
-    if (await cancel()) choose(false)
-  })
   $$('#draftChoice .seg-btn').forEach((button) => {
     button.addEventListener('click', () => choose(button.dataset.path === 'draft'))
   })
@@ -732,17 +725,18 @@
   window.ArtworkDraftMode = {
     active: () => active,
     start,
-    /** true : ce chemin a pris la barre d'action. Le choix ne se montre que pour une toile ou un poster à créer. */
+    /** true : ce chemin a pris la barre d'action. */
     refreshAction() {
-      const covered =
-        MODE === 'create' && !state.jumeau && (state.productType === 'toile' || state.productType === 'poster')
-      $('#draftChoice').classList.toggle('hidden', !covered)
       if (active) refreshDraftAction()
       return active
     },
   }
 
   if (MODE === 'create') {
+    // En création, le produit se choisit au-dessus de l'image : le sélecteur Toile | Poster |
+    // Tapisserie reste caché, il ne sert qu'au mode reimage et au poster personnalisé.
+    $('#draftChoice').classList.remove('hidden')
+    $('#productType').classList.add('hidden')
     applyPath()
     refreshAction()
   }

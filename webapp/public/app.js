@@ -81,11 +81,6 @@ const state = {
   // mode reimage v2 : l'œuvre est FIGÉE (toujours l'image n°2 du produit, l'image par défaut).
   // Elle n'est jamais ré-uploadée : à la publication elle est référencée par son mediaId.
   oeuvre: null, // {mediaId, url (pleine résolution), alt} | null
-  // Pipeline « toile → poster jumeau » : après la publication d'une toile éligible (portrait,
-  // collection mappée, favoris ★ poster présents), le studio enchaîne sur une étape poster
-  // pré-remplie. {toileId, collection:{id,title}} pendant l'étape, null sinon.
-  jumeau: null,
-  favBatchBusy: false, // lot de favoris en cours (gate du bouton publier en étape jumeau)
   initialFp: null, // empreinte de la galerie au chargement du produit (détection « modifié »)
   publishFp: null, // empreinte au moment où la clé d'idempotence a été créée (rotation si contenu changé)
 }
@@ -134,9 +129,6 @@ function loadImageFile(file) {
   // Changer d'œuvre = nouveau produit = l'app de création.
   if (IS_REIMAGE) return toast("L'œuvre est figée en mode reimage — utilisez l'app de création pour une nouvelle œuvre", 'err')
   if (!file.type.startsWith('image/')) return toast('Fichier non image', 'err')
-  // Étape « poster jumeau » en cours : une nouvelle œuvre = on l'abandonne proprement
-  // (non bloquant — la toile reste dans le filet candidates du bulk).
-  if (state.jumeau) exitJumeau(true)
   const reader = new FileReader()
   reader.onload = () => {
     state.imageDataUrl = reader.result
@@ -841,7 +833,6 @@ function dropGeneratedResults() {
 function clearResults() {
   state.publishKey = null // nouvelle session => nouvelle clé d'idempotence à la prochaine publication
   state.batchToken = {} // périme tout lot de favoris en cours -> ses écritures seront ignorées
-  state.favBatchBusy = false // le lot périmé ne relâchera pas le gate lui-même (il se sait périmé)
   // seuls les rendus Photopea ont un fichier temp serveur (res.path) ; les rendus IA sont des data URI
   for (const r of state.results) {
     if (r.path) fetch(RENDER + '/api/upload/' + r.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
@@ -1932,9 +1923,6 @@ async function runFavoritesBatch() {
   const total = ppFavs.length + aiFavs.length
   if (!total) return
   state.lastBatchImage = image
-  // Lot en cours : gate du bouton « Publier le poster » en étape jumeau (l'étape attend que
-  // TOUS les favoris soient rendus). Relâché à la fin du lot, ou par clearResults (session périmée).
-  state.favBatchBusy = true
   const hint = $('#mockupsHint')
   let done = 0,
     fails = 0
@@ -1949,33 +1937,24 @@ async function runFavoritesBatch() {
     return true
   }
   tick()
-  // Fin de lot (normale OU périmée) : on ne relâche le gate que si ce lot est ENCORE le lot
-  // courant (un lot plus récent a repris le flambeau — et le flag — sinon).
-  const release = () => {
-    if (!stale()) {
-      state.favBatchBusy = false
-      refreshAction()
-    }
-  }
   for (const pp of ppFavs) {
     try {
       const res = await renderFavoritePhotopea(pp, image)
-      if (!addResult(res)) return release()
+      if (!addResult(res)) return
     } catch { fails++ }
-    if (stale()) return release()
+    if (stale()) return
     done++
     tick()
   }
   for (const ai of aiFavs) {
     try {
       const res = await insertFavoriteAi(ai, image, ori, product)
-      if (!addResult(res)) return release()
+      if (!addResult(res)) return
     } catch { fails++ }
-    if (stale()) return release()
+    if (stale()) return
     done++
     tick()
   }
-  release()
   renderMockups() // restaure le hint normal
   toast(
     fails ? `${total - fails}/${total} favori(s) appliqué(s) · ${fails} échec(s)` : `${total} favori(s) appliqué(s) ✓`,
@@ -2520,259 +2499,6 @@ const progress = {
 }
 $('#progressClose').addEventListener('click', () => progress.hide())
 
-/* ---------- Pipeline « toile → poster jumeau » ----------
-   Décisions du grill 07/07 : après CHAQUE toile publiée (mode create), le studio enchaîne
-   automatiquement sur une étape poster PRÉ-REMPLIE (Flux 2) : même œuvre, type poster verrouillé,
-   collection poster mappée (collectionMap backend), favoris ★ poster auto-rendus + jumeaux
-   passe-partout (T1 : rendu au premier plan). Défaut = 1 clic « Publier le poster » ; ajustable.
-   Non bloquant (B) : abandonner laisse la toile dans le filet candidates du bulk. Publication du
-   poster via la machinerie bulk EXISTANTE : create-one (transpose:true → texte réécrit depuis la
-   toile côté backend) → webhook variantes → finalize (pose link.poster / link.painting).
-   Sens unique : toile ⟹ poster ; un poster publié seul n'entraîne rien. */
-
-// Après le succès d'une toile : décide s'il y a une étape poster (favoris ★ poster du ratio
-// + collection mappée), et la lance. Sinon : fin normale (+ ligne actionnable si thème non mappé).
-async function maybeStartJumeau(toileId) {
-  if (state.jumeau || !toileId || !state.collection || !state.imageDataUrl) return
-  if (state.orientation === 'square') return // pas de poster carré (garde backend identique)
-  // Favoris ★ poster pour ce ratio (mêmes filtres que le lot auto). Aucun -> pas d'étape :
-  // c'est le gate qui active le paysage tout seul le jour où des favoris paysage existent.
-  const ori = state.orientation
-  const hasFavs =
-    state.saved.photopea.some(
-      (t) => (!t.type || t.type === 'poster') && (!(t.orientations && t.orientations[0]) || t.orientations[0] === ori)
-    ) ||
-    state.saved.ai.some(
-      (t) => t.favorite && (!t.product || PRODUCT_TO_TYPE[t.product] === 'poster') && (!t.orientation || t.orientation === ori)
-    )
-  if (!hasFavs) return
-  const toileCollection = state.collection
-  const img = state.imageDataUrl // l'œuvre au moment T (anti-course : elle peut changer pendant l'await)
-  // RÉSERVATION avant l'await : sans ça, une nouvelle œuvre chargée pendant la latence du fetch
-  // ne verrait pas d'étape en cours (loadImageFile teste state.jumeau) et startJumeau lancerait un
-  // poster de la NOUVELLE œuvre lié à l'ANCIENNE toile (corruption). Le sentinel {pending} bloque ça.
-  state.jumeau = { pending: true, toileId }
-  let d = null,
-    netError = false
-  try {
-    const { data } = await fetchJsonT(
-      `${API}/api/bulk-posters/collection-map?collectionId=${encodeURIComponent(toileCollection.id)}` +
-        `&collectionTitle=${encodeURIComponent(toileCollection.title || '')}`,
-      {},
-      20000
-    )
-    d = data
-  } catch {
-    netError = true
-  }
-  // Session détournée pendant l'await (nouvelle œuvre chargée -> exitJumeau a nettoyé le sentinel ;
-  // ou l'œuvre a changé) : on abandonne SANS rien lancer. La toile reste dans le filet candidates.
-  if (
-    !state.jumeau ||
-    !state.jumeau.pending ||
-    state.jumeau.toileId !== toileId ||
-    state.imageDataUrl !== img
-  ) {
-    if (state.jumeau && state.jumeau.pending && state.jumeau.toileId === toileId) state.jumeau = null
-    return
-  }
-  state.jumeau = null // libère le sentinel avant la décision finale
-  if (netError) return // blip réseau : silencieux (la toile est rattrapable via candidates)
-  const target = d && d.success && d.data ? d.data.posterCollection : null
-  if (d && d.success === true && !target) {
-    // Cas C1 : thème réellement sans collection poster — message PERSISTANT dans l'overlay de
-    // succès (un toast de 3 s se perd sur mobile), en français courant (pas de « mapping »).
-    $('#progressMsg').textContent =
-      `Pas de poster : « ${toileCollection.title} » n'a pas encore de collection poster. ` +
-      `Crée la collection, puis demande à Claude de l'ajouter à la table des correspondances.`
-    return
-  }
-  if (!target) return // réponse backend inattendue (success:false) : pas de C1, silencieux
-  // On enchaîne : l'overlay bascule son message puis s'efface sur la galerie poster qui se remplit.
-  $('#progressTitle').textContent = 'Toile publiée ✓'
-  $('#progressMsg').textContent = 'Au tour du poster — je prépare les mockups…'
-  setTimeout(() => progress.hide(), 1600)
-  startJumeau(toileId, target)
-}
-
-function startJumeau(toileId, posterCollection) {
-  state.jumeau = { toileId, collection: posterCollection }
-  // Bascule programmatique en poster (pattern reimage) — sans confirm : les rendus sont déjà vidés.
-  $$('#productType .seg-btn').forEach((b) => {
-    b.classList.toggle('active', b.dataset.type === 'poster')
-    b.classList.toggle('hidden', b.dataset.type !== 'poster') // type verrouillé pendant l'étape
-  })
-  state.productType = 'poster'
-  state.lastBatchImage = null
-  state.batchToken = {}
-  loadTemplates() // catalogue poster (l'ajout manuel de mockups reste possible)
-  // Collection poster imposée par le mapping : affichée choisie, non modifiable (pas de ✕).
-  state.collection = posterCollection
-  collList.classList.add('hidden')
-  collSearch.classList.add('hidden')
-  collChosen.innerHTML = `<span>${escapeHtml(posterCollection.title)}</span>`
-  collChosen.classList.remove('hidden')
-  $('.brand em').textContent = 'Poster jumeau'
-  $('#publishBtn').textContent = 'Publier le poster'
-  jumeauSkipUi(true)
-  refreshAction()
-  maybeRunFavorites() // favoris ★ poster sur l'œuvre déjà chargée -> rendus + jumeaux passe-partout
-}
-
-// Sortie de l'étape (succès, passer, ou nouvelle œuvre) : restaure le studio « toile » de départ.
-function exitJumeau(skipped) {
-  if (!state.jumeau) return
-  // Sentinel de réservation (l'étape n'a pas encore basculé l'UI) : on le lève juste, sans reset.
-  if (state.jumeau.pending) {
-    state.jumeau = null
-    return
-  }
-  state.jumeau = null
-  $$('#productType .seg-btn').forEach((b) => {
-    b.classList.remove('hidden')
-    b.classList.toggle('active', b.dataset.type === 'toile')
-  })
-  state.productType = 'toile'
-  state.lastBatchImage = null
-  state.batchToken = {}
-  $('.brand em').textContent = 'Publisher'
-  $('#publishBtn').textContent = "Publier l'œuvre"
-  jumeauSkipUi(false)
-  clearResults()
-  clearCollection()
-  loadCollections()
-  loadTemplates()
-  if (skipped)
-    toast('Poster laissé de côté — la toile reste dans la liste des posters à faire.')
-}
-
-// Bouton « Poster plus tard » dans la barre d'action (décision B : jamais bloquant).
-function jumeauSkipUi(show) {
-  let b = $('#jumeauSkip')
-  if (!b && show) {
-    b = document.createElement('button')
-    b.id = 'jumeauSkip'
-    b.className = 'ghost-btn'
-    b.textContent = 'Poster plus tard'
-    b.addEventListener('click', () => exitJumeau(true))
-    $('#publishBtn').insertAdjacentElement('beforebegin', b)
-  }
-  if (b) b.classList.toggle('hidden', !show)
-}
-
-// Publication du poster jumeau : create-one (transpose) -> poll variantes -> finalize (liens).
-// Réutilise la machinerie bulk : anti-doublon 409, rollback, brouillon jamais perdu (candidates).
-async function publishJumeau(imgs) {
-  const { toileId, collection } = state.jumeau
-  const ratio = state.orientation
-  progress.step('Création du poster… (texte réécrit depuis la toile, ~1 min)')
-  let r, data
-  try {
-    ;({ res: r, data } = await fetchJsonT(
-      `${API}/api/bulk-posters/create-one`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          toileId,
-          ratio,
-          collectionId: collection.id,
-          collectionTitle: collection.title,
-          transpose: true, // le backend relit le texte de la toile et le transpose en affiche
-          images: imgs,
-        }),
-      },
-      180000
-    ))
-  } catch (netErr) {
-    throw new Error(
-      netErr.name === 'AbortError'
-        ? 'Délai dépassé (le serveur met trop de temps à répondre).'
-        : 'Connexion au serveur impossible.'
-    )
-  }
-  data = data || {}
-  if (r.status === 409) {
-    if (data.draftProductId) {
-      // Un brouillon existe déjà (réponse perdue sur 524 / re-clic) : on REPREND (poll + finalize)
-      // au lieu de recréer — sinon coche verte trompeuse alors que le poster reste en brouillon.
-      progress.step('Poster déjà en préparation — reprise…')
-      await finalizeJumeau(toileId, data.draftProductId, ratio)
-      return
-    }
-    // Sinon : un poster est déjà lié à cette toile (link.poster) — vraiment rien à faire.
-    progress.done('Poster déjà lié à cette toile ✓')
-    exitJumeau(false)
-    return
-  }
-  if (!r.ok || data.success !== true) {
-    throw new Error(data.message || data.error || 'Erreur serveur (HTTP ' + r.status + ')')
-  }
-  await finalizeJumeau(toileId, data.productId, ratio)
-}
-
-// Poll des variantes (asynchrones, webhook) puis finalize (publication + liens toile↔poster).
-// Chaque fetch est BORNÉ (fetchJsonT) : un status/finalize suspendu ne doit pas figer le spinner.
-async function finalizeJumeau(toileId, posterId, ratio) {
-  progress.step('Poster créé — variantes en cours de création…')
-  const t0 = Date.now()
-  let vanished = false
-  while (Date.now() - t0 < 240000) {
-    await sleep(5000)
-    try {
-      const { data: sd } = await fetchJsonT(
-        `${API}/api/bulk-posters/status?productId=${encodeURIComponent(posterId)}&ratio=${ratio}`,
-        {},
-        20000
-      )
-      if (sd && sd.success && sd.data) {
-        if (!sd.data.exists) {
-          vanished = true
-          break
-        }
-        progress.step(`Variantes du poster… ${sd.data.variantsCount}/${sd.data.expected || '?'}`)
-        if (sd.data.complete) break
-      }
-    } catch {} // blip réseau / timeout d'un poll : on retente au tour suivant
-  }
-  let fd = {}
-  try {
-    ;({ data: fd } = await fetchJsonT(
-      `${API}/api/bulk-posters/finalize`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ toileId, productId: posterId, ratio }),
-      },
-      60000
-    ))
-    fd = fd || {}
-  } catch {
-    throw new Error('Finalisation interrompue — le poster se terminera tout seul dans l’heure.')
-  }
-  if (fd.published) {
-    progress.done('Poster publié ✓ — toile et poster liés', fd.link)
-    exitJumeau(false)
-    return
-  }
-  if (fd.pending) {
-    // Variantes pas encore complètes (webhook lent, raté, ou cap quotidien). Rien n'est perdu : le
-    // brouillon est gardé, et le cron backend RepairPendingPosters (toutes les heures) recrée les
-    // variantes manquantes puis le publie tout seul. Aucune action du owner.
-    progress.done('⏳ Poster créé en brouillon')
-    $('#progressMsg').textContent =
-      'Ses variantes ne sont pas toutes prêtes : il se publiera tout seul dès qu’elles le seront, dans l’heure. Rien à faire.'
-    exitJumeau(false)
-    return
-  }
-  if (vanished || fd.missing) {
-    throw new Error('Le brouillon du poster a disparu — la toile est revenue dans la liste des posters à faire.')
-  }
-  throw new Error(
-    fd.message || 'Finalisation du poster impossible — il se terminera tout seul dans l’heure.'
-  )
-}
-
 /* ---------- Publication ---------- */
 function refreshAction() {
   if (IS_REIMAGE) return refreshActionReimage()
@@ -2783,22 +2509,6 @@ function refreshAction() {
   const info = $('#actionInfo'),
     btn = $('#publishBtn')
   const n = state.results.length
-  // Étape « poster jumeau » : on publie quand la galerie est COMPLÈTE (lot de favoris fini +
-  // tous les passe-partout rendus) — sinon des jumeaux encore en file seraient omis en silence.
-  // (Le sentinel {pending} n'a pas de collection : l'UI est encore en mode toile -> branche normale.)
-  if (state.jumeau && state.jumeau.collection) {
-    const twinsPending = state.results.some(
-      (r) => (r.psd || r.decor) && !r.kept && (!r.pp || r.pp.busy)
-    )
-    if (state.favBatchBusy || twinsPending) {
-      info.textContent = `Préparation du poster… ${n} rendu${n > 1 ? 's' : ''}`
-      btn.disabled = true
-      return
-    }
-    info.textContent = `Poster jumeau · ${state.collection.title} · ${n} rendu${n > 1 ? 's' : ''}`
-    btn.disabled = n === 0
-    return
-  }
   const parts = []
   if (state.orientation) parts.push(labelOri(state.orientation))
   if (state.collection) parts.push(state.collection.title)
@@ -2915,13 +2625,6 @@ $('#publishBtn').addEventListener('click', async () => {
         })
       }
     }
-    // Étape « poster jumeau » : la même galerie part vers la machinerie bulk (create-one en
-    // mode transpose -> poll variantes -> finalize qui lie toile↔poster). L'overlay plein
-    // écran bloque le double-clic ; l'anti-doublon 409 du backend couvre le reste.
-    if (state.jumeau) {
-      await publishJumeau(imgs)
-      return
-    }
     // Clé d'idempotence : stable tant que le CONTENU à publier ne change pas — un re-clic
     // après un timeout (524) renvoie le résultat déjà obtenu au lieu d'un doublon. En
     // reimage, une galerie MODIFIÉE après un échec doit repartir avec une clé neuve
@@ -3023,12 +2726,7 @@ $('#publishBtn').addEventListener('click', async () => {
       clearResults()
     } else {
       progress.done('Produit publié ✓', link)
-      // on retire les rendus publiés (nouvelle session propre)
-      const wasToile = TYPE_MAP[state.productType] === 'painting'
-      clearResults()
-      // Pipeline « toile → poster jumeau » : chaque toile publiée enchaîne sur son poster
-      // (si favoris ★ poster du ratio + collection mappée — sinon fin normale / ligne C1).
-      if (wasToile) maybeStartJumeau(data.productId)
+      clearResults() // on retire les rendus publiés (nouvelle session propre)
     }
   } catch (e) {
     progress.fail(e.message)
