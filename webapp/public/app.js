@@ -1442,13 +1442,12 @@ async function urlToDataUrl(url) {
 /* ---------- Passe-partout : jumeaux d'affiche (poster) ----------
    Pour CHAQUE mockup d'un poster on publie un 2e visuel : le même décor mais avec l'œuvre
    entourée d'une marge blanche (effet passe-partout). On re-rend le mockup avec une œuvre MAT-ÉE
-   (construite au canvas, sans IA) : toile blanche AU FORMAT CIBLE du poster (3:4 / 4:3 — leçon
-   bulk : un mat au ratio natif de l'œuvre se fait rogner par le smart object si l'œuvre dévie de
-   la cible ; parité avec la version sharp du render server), bordure blanche ÉGALE en pixels sur
-   les 4 côtés, œuvre rétrécie en COVER dans le cadre intérieur (remplit bord à bord, léger
-   rognage accepté). Le jumeau « monte » sur son mockup source (res.pp) : lié 1:1, re-roll +
-   désactivation possibles, supprimé avec lui. À la publication, tous les jumeaux sont ajoutés
-   EN FIN de tableau, dans l'ordre des mockups. */
+   (construite au canvas, sans IA) : toile blanche AU FORMAT CIBLE du poster (3:4 / 4:3 — un mat
+   au ratio natif de l'œuvre se fait rogner par le smart object si l'œuvre dévie de la cible),
+   bordure blanche ÉGALE en pixels sur les 4 côtés, œuvre rétrécie en COVER dans le cadre intérieur
+   (remplit bord à bord, léger rognage accepté). Le jumeau « monte » sur son mockup source (res.pp) :
+   lié 1:1, re-roll + désactivation possibles, supprimé avec lui. À la publication, tous les jumeaux
+   sont ajoutés EN FIN de tableau, dans l'ordre des mockups. */
 const PP_RATIO = 0.08 // bordure blanche = 8% du petit côté (réglable)
 const ppEligible = () => state.productType === 'poster'
 
