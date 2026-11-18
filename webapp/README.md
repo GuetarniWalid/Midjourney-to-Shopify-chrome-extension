@@ -56,7 +56,9 @@ La même page (`public/index.html` + `app.js` + `style.css`) tourne en plusieurs
 par le backend via `window.PUBLISHER_CONFIG.mode` (ou `?mode=…` en local sur le moteur) :
 
 - **create** (défaut) — publication classique d'une œuvre.
-- **reimage** (`/publisher/reimage`) — refaire les images d'un produit existant.
+- **reimage** (`/publisher/reimage`) — refaire les images d'une tapisserie existante. Jamais d'une
+  toile ni d'un poster : on ne touche plus les anciens produits, et le serveur ne propose et
+  n'accepte que des tapisseries.
 - **personalized** (`/publisher/personalized`) — **créer un poster personnalisé** (studio piloté
   par metafields). Logique dédiée dans `public/personalized.js` (chargé après `app.js`, même scope) ;
   `app.js` ne porte que les points de branchement (`IS_PERSONALIZED`).

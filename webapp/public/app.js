@@ -20,9 +20,11 @@ const IS_PERSONALIZED = MODE === 'personalized'
 const renderUrl = (p) => RENDER + p
 // type produit (UI en FR) -> enum backend
 const TYPE_MAP = { toile: 'painting', poster: 'poster', tapisserie: 'tapestry' }
-// type produit (UI) <-> "product" des décors IA (canvas/poster/tapestry)
-const productOf = (t) => (t === 'poster' ? 'poster' : t === 'tapisserie' ? 'tapestry' : 'canvas')
-const PRODUCT_TO_TYPE = { canvas: 'toile', poster: 'poster', tapestry: 'tapisserie' }
+// type produit (UI) <-> "product" des décors IA. Une toile ne passe plus par les mockups (nouvelle
+// fiche) : les décors « canvas » de la bibliothèque ne s'affichent plus nulle part.
+const PRODUCT_OF = { poster: 'poster', tapisserie: 'tapestry' }
+const productOf = (t) => PRODUCT_OF[t]
+const PRODUCT_TO_TYPE = { poster: 'poster', tapestry: 'tapisserie' }
 // Pièce : valeur du <select #decorRoom> -> libellé FR. Sert à ranger les décors IA sauvegardés
 // dans le bon groupe « pièce » de l'écran « Mes templates sauvegardés ». '' / inconnue -> « Autre ».
 const ROOM_LABELS = {
@@ -58,8 +60,9 @@ const sectionForPsd = (psdUrl, fallback) => state.sectionOverrides[subfolderOf(p
 const state = {
   imageDataUrl: null, // l'oeuvre uploadée (dataURL)
   orientation: null, // 'portrait' | 'landscape' | 'square'
-  // personalized : verrouillé poster AVANT le premier loadTemplates (sinon course toile/poster)
-  productType: IS_PERSONALIZED ? 'poster' : 'toile',
+  // Verrouillé AVANT le premier loadTemplates : poster pour un poster personnalisé, tapisserie pour
+  // le reimage (il ne refait plus que les tapisseries), toile pour la nouvelle fiche.
+  productType: IS_PERSONALIZED ? 'poster' : IS_REIMAGE ? 'tapisserie' : 'toile',
   collections: [],
   collection: null, // {id, title}
   templates: [], // catégories scannées
@@ -77,7 +80,7 @@ const state = {
   favPsds: new Set(), // chemins PSD favoris (pour l'état des étoiles)
   lastBatchImage: null, // dernière œuvre pour laquelle les favoris ont été appliqués auto
   batchToken: null, // jeton du lot de favoris courant (sert à annuler un lot devenu périmé)
-  product: null, // mode reimage : contexte du produit choisi {id, title, orientation, productType, images, hasVideo}
+  product: null, // mode reimage : la tapisserie choisie {id, title, productType, images, hasVideo}
   // mode reimage v2 : l'œuvre est FIGÉE (toujours l'image n°2 du produit, l'image par défaut).
   // Elle n'est jamais ré-uploadée : à la publication elle est référencée par son mediaId.
   oeuvre: null, // {mediaId, url (pleine résolution), alt} | null
@@ -168,14 +171,6 @@ function detectOrientation(w, h) {
     ori = 'portrait'; label = 'Portrait'
   } else {
     ori = 'landscape'; label = 'Paysage'
-  }
-  // mode reimage : l'orientation du produit est IMPOSÉE — l'image devra s'y conformer (retaillage)
-  if (IS_REIMAGE && state.product && state.product.orientation) {
-    const locked = state.product.orientation
-    if (ori !== locked)
-      toast(`L'image semble ${labelOri(ori)}, le produit est ${labelOri(locked)} — le retaillage convertira au bon format.`)
-    ori = locked
-    label = { portrait: 'Portrait', landscape: 'Paysage', square: 'Carré' }[locked]
   }
   // déjà au bon format ? tolérance relative 3% vs le ratio cible de sa classe
   const target = TARGET_RATIO[ori]
@@ -783,51 +778,28 @@ $('#cleanValidate').addEventListener('click', () => {
 })
 
 /* ---------- 2. Type produit + collections ---------- */
+// Le sélecteur ne se montre qu'au poster personnalisé, verrouillé ; en création, artwork-draft.js le
+// clique, caché, pour suivre le produit choisi au-dessus de l'image. Jamais en reimage (tapisserie).
 $$('#productType .seg-btn').forEach((btn) =>
   btn.addEventListener('click', () => {
     if (state.productType === btn.dataset.type) return
-    // changer de type = autres collections ET autres rendus -> on réinitialise les rendus
-    // générés. En reimage, les vignettes CONSERVÉES du produit restent (seuls les rendus
-    // générés avec l'ancien type sautent).
-    const generated = IS_REIMAGE ? state.results.filter((r) => !r.kept) : state.results
+    // changer de type = autres collections ET autres rendus -> on réinitialise les rendus générés
     if (
-      generated.length &&
-      !confirm(
-        IS_REIMAGE
-          ? 'Changer de type va effacer les rendus générés (les images du produit restent). Continuer ?'
-          : 'Changer de type de produit va effacer les rendus déjà générés. Continuer ?'
-      )
+      state.results.length &&
+      !confirm('Changer de type de produit va effacer les rendus déjà générés. Continuer ?')
     )
       return
     $$('#productType .seg-btn').forEach((b) => b.classList.remove('active'))
     btn.classList.add('active')
     state.productType = btn.dataset.type
-    if (IS_REIMAGE) {
-      dropGeneratedResults()
-    } else {
-      clearResults()
-      clearCollection()
-      loadCollections() // en mode reimage il n'y a pas de collection à choisir
-    }
+    clearResults()
+    clearCollection()
+    loadCollections()
     loadTemplates() // recharge le catalogue + re-rend les décors IA du nouveau type (inclut renderMockups)
     state.lastBatchImage = null // nouveau type = nouveau jeu de favoris -> ré-application auto
     maybeRunFavorites()
   })
 )
-
-// Retire UNIQUEMENT les rendus générés — les vignettes conservées du produit restent
-// (mode reimage : changement de type produit, la curation en cours ne doit pas se perdre).
-function dropGeneratedResults() {
-  state.batchToken = {} // périme un lot de favoris en vol
-  for (const r of state.results)
-    if (!r.kept) {
-      if (r.path) fetch(RENDER + '/api/upload/' + r.path.split('/').pop(), { method: 'DELETE' }).catch(() => {})
-      dropTwinFile(r.pp)
-    }
-  state.results = state.results.filter((r) => r.kept)
-  renderResults()
-  refreshAction()
-}
 
 // Vide la galerie de rendus (et supprime les fichiers serveur correspondants)
 function clearResults() {
@@ -903,16 +875,14 @@ document.addEventListener('click', (e) => {
   if (!e.target.closest('.combo')) collList.classList.add('hidden')
 })
 
-/* ---------- 2b. Mode « reimage » : refaire les images d'un produit existant ---------- */
-// La carte « Produit à refaire » n'existe à l'écran qu'en mode reimage (cachée en mode create).
-// Le produit choisi IMPOSE son orientation et son type ; ses images actuelles sont montrées en
-// lecture seule (elles seront toutes remplacées par les nouveaux rendus à la publication).
+/* ---------- 2b. Mode « reimage » : refaire les images d'une tapisserie existante ---------- */
+// La carte « Tapisserie à refaire » n'existe à l'écran qu'en mode reimage (cachée en mode create).
+// Une tapisserie seulement : on ne refait jamais les images d'une toile ou d'un poster (règle de
+// Walid, 17/11/2026), et le serveur ne propose et n'accepte que des tapisseries. Ses images
+// actuelles sont montrées dans la galerie, supprimables et réordonnables.
 const prodSearch = $('#productSearch'),
   prodList = $('#productList'),
   prodChosen = $('#productChosen')
-// type backend ('painting'|'poster'|'tapestry') -> type UI ('toile'|'poster'|'tapisserie')
-const BACKEND_TYPE_TO_UI = { painting: 'toile', poster: 'poster', tapestry: 'tapisserie' }
-const TYPE_LABELS = { toile: 'Toile', poster: 'Poster', tapisserie: 'Tapisserie' }
 const ORI_LABELS = { portrait: 'Portrait', landscape: 'Paysage', square: 'Carré' }
 
 let prodSearchT = null // timer du debounce de la recherche produit
@@ -922,16 +892,13 @@ let oeuvreLoadToken = null // identité du chargement de l'œuvre en cours (anti
 
 // Réécrit l'UI pour le mode reimage : carte produit visible, numéros des cartes, header, libellés.
 function initReimageUi() {
-  $('.brand em').textContent = 'Refaire les images'
+  $('.brand em').textContent = 'Refaire les images d’une tapisserie'
   $('#productCard').classList.remove('hidden')
   $('#uploadCard .card-title').textContent = "2 · L'œuvre (figée)"
   $('#mockupsCard .card-title').textContent = '3 · Mockups'
   $('#resultsCard .card-title').textContent = '4 · Vos rendus'
-  // pas de collection en mode reimage ; le type produit est auto -> la carte paramètres ne
-  // réapparaît (segment seul) que si le type du produit est indéterminable (choix manuel)
-  $('#collectionField').classList.add('hidden')
+  // ni collection ni type à choisir : la carte paramètres reste cachée (une tapisserie, toujours)
   $('#paramsCard').classList.add('hidden')
-  $('#paramsCard .card-title').textContent = 'Type de produit'
   $('#publishBtn').textContent = 'Remplacer les images'
   // l'œuvre est figée : pas d'upload, pas de favoris auto — la note des mockups change de sens
   $('#mockupsCard .card-note').textContent =
@@ -939,7 +906,7 @@ function initReimageUi() {
   fileInput.disabled = true // le label ne peut plus ouvrir le sélecteur de fichier
   dropzone.classList.add('readonly')
   // les vignettes de la galerie viennent du produit : l'état vide doit le dire
-  $('#resultsEmpty').textContent = 'Choisissez un produit : ses images actuelles apparaîtront ici.'
+  $('#resultsEmpty').textContent = 'Choisissez une tapisserie : ses images actuelles apparaîtront ici.'
   updateDropzoneLock()
 }
 
@@ -952,7 +919,7 @@ function updateDropzoneLock() {
   const b = $('#dzInner b')
   if (b)
     b.textContent = locked
-      ? "Choisissez d'abord le produit à refaire"
+      ? "Choisissez d'abord la tapisserie à refaire"
       : IS_REIMAGE
         ? 'Chargement de l’œuvre…'
         : 'Touchez pour choisir une image'
@@ -986,38 +953,23 @@ function renderProductList(list) {
           (p.status === 'DRAFT' ? '<span class="pi-badge">brouillon</span>' : '') +
           '</div>'
       )
-      .join('') || `<div class="combo-item" style="color:var(--muted)">Aucun produit</div>`
+      .join('') || `<div class="combo-item" style="color:var(--muted)">Aucune tapisserie</div>`
   prodList.classList.remove('hidden')
 }
 
-// Pastille du produit choisi : titre + type/orientation imposés (ex « Toile · Portrait »).
+// Pastille de la tapisserie choisie : son titre.
 function renderProductChosen() {
   const p = state.product
   if (!p) return
-  const bits = []
-  const uiType = BACKEND_TYPE_TO_UI[p.productType]
-  if (uiType) bits.push(TYPE_LABELS[uiType])
-  if (p.orientation) bits.push(ORI_LABELS[p.orientation])
   prodChosen.innerHTML =
-    `<span>${escapeHtml(p.title)}</span>` +
-    (bits.length ? `<span class="chosen-info">${bits.join(' · ')}</span>` : '') +
-    `<span class="x">✕</span>`
+    `<span>${escapeHtml(p.title)}</span><span class="chosen-info">Tapisserie</span><span class="x">✕</span>`
   prodChosen.classList.remove('hidden')
 }
 
 // Empreinte ordonnée de la galerie : médias conservés par mediaId, nouveaux rendus par id
 // local. Sert au bouton publier (« quelque chose a-t-il changé ? ») ET à la rotation de la
 // clé d'idempotence (un payload différent ne doit jamais être dédupliqué par l'ancien).
-const galleryFp = () =>
-  state.results.map((r) => (r.kept ? r.mediaId : 'new:' + r.id)).join('|') +
-  // ordre des jumeaux passe-partout inclus -> un réordonnancement des bords blancs SEUL est publiable (reimage)
-  '|pp:' +
-  (ppEligible()
-    ? ppOrderedResults()
-        .filter((r) => r.pp && r.pp.url && !r.pp.optedOut)
-        .map((r) => r.id)
-        .join(',')
-    : '')
+const galleryFp = () => state.results.map((r) => (r.kept ? r.mediaId : 'new:' + r.id)).join('|')
 
 // L'œuvre du produit — TOUJOURS son image n°2 (index 1) : c'est l'image par défaut que le
 // Publisher place en 2e position à chaque publication. Produit à une seule image : celle-là.
@@ -1038,9 +990,9 @@ function applyOeuvre(ctx) {
     sourcePreview.src = ''
     sourcePreview.classList.add('hidden')
     dzInner.classList.remove('hidden')
-    state.orientation = ctx.orientation || null
+    state.orientation = null
     badge.classList.add('hidden')
-    toast('Produit sans œuvre exploitable — choisissez-en un autre.', 'err')
+    toast('Tapisserie sans œuvre exploitable — choisissez-en une autre.', 'err')
     renderMockups()
     return
   }
@@ -1048,24 +1000,20 @@ function applyOeuvre(ctx) {
   sourcePreview.src = state.oeuvre.url
   sourcePreview.classList.remove('hidden')
   dzInner.classList.add('hidden')
-  // orientation : verrou produit si connu, sinon déduite des dimensions réelles de l'œuvre
-  const setOri = (ori) => {
-    state.orientation = ori
-    badge.textContent = ORI_LABELS[ori] || ori
-    badge.className = 'badge ' + ori
-    badge.classList.remove('hidden')
-    renderMockups()
-    refreshAction()
-  }
-  if (ctx.orientation) setOri(ctx.orientation)
+  // orientation : déduite des dimensions réelles de l'œuvre (les tailles d'une tapisserie, largeur
+  // et hauteur en deux options, ne la disent pas)
   const probe = new Image()
   probe.onload = () => {
     if (token !== oeuvreLoadToken) return
     state.sourceRatio = probe.naturalWidth / probe.naturalHeight
-    if (!ctx.orientation) {
-      const r = state.sourceRatio
-      setOri(r >= 0.9 && r <= 1.1 ? 'square' : r < 0.9 ? 'portrait' : 'landscape')
-    }
+    const r = state.sourceRatio
+    const ori = r >= 0.9 && r <= 1.1 ? 'square' : r < 0.9 ? 'portrait' : 'landscape'
+    state.orientation = ori
+    badge.textContent = ORI_LABELS[ori]
+    badge.className = 'badge ' + ori
+    badge.classList.remove('hidden')
+    renderMockups()
+    refreshAction()
   }
   probe.src = state.oeuvre.url
   // data URL pour la GÉNÉRATION (Photopea / décor IA). En cas d'échec (CORS/réseau),
@@ -1114,7 +1062,6 @@ function clearProduct() {
   prodSearch.classList.remove('hidden')
   prodList.classList.add('hidden')
   $('#productVideoNote').classList.add('hidden')
-  $('#paramsCard').classList.add('hidden')
   // l'œuvre et la galerie appartiennent au produit : tout part avec lui
   state.oeuvre = null
   state.imageDataUrl = null
@@ -1133,7 +1080,8 @@ function clearProduct() {
   refreshAction()
 }
 
-// Sélection : pastille immédiate puis chargement du contexte (orientation, type, images, vidéo).
+// Sélection : pastille immédiate puis chargement du contexte (images, vidéo). Le serveur refuse
+// tout produit qui n'est pas une tapisserie, et son message le dit.
 async function selectProduct(p) {
   const token = (prodSelectToken = {})
   prodList.classList.add('hidden')
@@ -1152,34 +1100,18 @@ async function selectProduct(p) {
   } catch (e) {
     if (token !== prodSelectToken) return // désélectionné / re-sélectionné entre-temps
     clearProduct()
-    return toast('Produit : ' + e.message, 'err')
+    return toast(e.message, 'err')
   }
   if (token !== prodSelectToken) return
   applyReimageContext(ctx)
 }
 
-// Applique le contexte du produit : verrouillage type/orientation, œuvre figée (image n°2),
-// galerie re-seedée avec les images actuelles du produit. Changer de produit = session neuve.
+// Applique le contexte de la tapisserie : œuvre figée (image n°2), galerie re-seedée avec ses images
+// actuelles. Changer de produit = session neuve.
 function applyReimageContext(ctx) {
   state.product = ctx
   state.publishKey = null // tout changement de produit => nouvelle clé d'idempotence
   state.publishFp = null
-
-  // type de produit auto : segment caché si le type est connu, sinon choix manuel
-  const uiType = BACKEND_TYPE_TO_UI[ctx.productType] || null
-  if (uiType) {
-    $('#paramsCard').classList.add('hidden')
-    if (uiType !== state.productType) {
-      // même bascule que le segment Toile/Poster/Tapisserie, SANS recharger les collections
-      $$('#productType .seg-btn').forEach((b) => b.classList.toggle('active', b.dataset.type === uiType))
-      state.productType = uiType
-      state.lastBatchImage = null
-      state.batchToken = {} // périme un lot de favoris encore en vol (il rendait l'ancien type)
-      loadTemplates() // recharge le catalogue du nouveau type (inclut renderMockups)
-    }
-  } else {
-    $('#paramsCard').classList.remove('hidden')
-  }
 
   renderProductChosen()
   $('#productVideoNote').classList.toggle('hidden', !ctx.hasVideo)
@@ -1204,7 +1136,7 @@ function resetReimageSession() {
 }
 
 if (IS_REIMAGE && prodSearch) {
-  // recherche débouncée (300 ms) ; champ vide = les 20 produits les plus récemment modifiés
+  // recherche débouncée (300 ms), tapisseries seulement ; champ vide = les plus récemment modifiées
   prodSearch.addEventListener('input', () => {
     clearTimeout(prodSearchT)
     const term = prodSearch.value.trim()
@@ -1490,15 +1422,10 @@ function buildMattedOeuvre(srcDataUrl) {
     img.src = srcDataUrl
   })
 }
-// Source de l'œuvre (création : l'upload ; reimage : l'image n°2 figée du produit).
-async function oeuvreSourceDataUrl() {
-  if (state.imageDataUrl) return state.imageDataUrl
-  if (state.oeuvre && state.oeuvre.url) return await urlToDataUrl(state.oeuvre.url)
-  return null
-}
-// œuvre mat-ée, mise en cache (recalcul si l'œuvre change).
+// œuvre mat-ée, mise en cache (recalcul si l'œuvre change). Le passe-partout ne sert qu'au poster
+// personnalisé : son œuvre est l'image envoyée (le reimage ne refait plus de poster).
 async function getMattedOeuvre() {
-  const src = await oeuvreSourceDataUrl()
+  const src = state.imageDataUrl
   if (!src) return null
   if (state.mattedOeuvre && state.mattedOeuvreSrc === src) return state.mattedOeuvre
   state.mattedOeuvre = await buildMattedOeuvre(src)
@@ -1711,7 +1638,8 @@ async function completeFamily(t) {
   if (state.needsResize) return toast("Retaillez d'abord l'image au bon format", 'err')
   const missing = missingOris(t)
   if (!missing.length) return toast('Tous les ratios existent déjà', 'ok')
-  const product = t.product || 'canvas', theme = t.theme || null, roomType = t.roomType || null, scene = t.scene || null
+  // un ancien décor sans produit prend celui de la grille où il s'affiche
+  const product = t.product || productOf(state.productType), theme = t.theme || null, roomType = t.roomType || null, scene = t.scene || null
   let familyId = t.familyId
   try {
     if (!familyId) {
@@ -2530,12 +2458,12 @@ function refreshActionReimage() {
     btn = $('#publishBtn')
   const n = state.results.length
   if (!state.product) {
-    info.textContent = 'Choisissez le produit à refaire'
+    info.textContent = 'Choisissez la tapisserie à refaire'
     btn.disabled = true
     return
   }
   if (!state.oeuvre) {
-    info.textContent = 'Produit sans œuvre exploitable'
+    info.textContent = 'Tapisserie sans œuvre exploitable'
     btn.disabled = true
     return
   }
@@ -2636,15 +2564,13 @@ $('#publishBtn').addEventListener('click', async () => {
           : 'pk_' + Date.now() + '_' + Math.random().toString(36).slice(2)
       state.publishFp = fpNow
     }
-    // mode reimage : on remplace les images d'un produit existant (mêmes images, autre cible)
+    // mode reimage : on remplace les images d'une tapisserie existante (mêmes images, autre cible)
     const payload = IS_REIMAGE
       ? {
           productId: state.product.id,
           ratio: state.orientation,
           images: imgs,
           idempotencyKey: state.publishKey,
-          // produit sans metafield artwork.type : on transmet le choix manuel du segment
-          ...(state.product.productType ? {} : { productType: TYPE_MAP[state.productType] }),
         }
       : {
           images: imgs,

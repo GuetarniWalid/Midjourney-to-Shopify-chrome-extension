@@ -24,13 +24,14 @@
 
   <main class="content">
 
-    <!-- 0. Produit à refaire (mode reimage uniquement — révélé par app.js) -->
+    <!-- 0. Tapisserie à refaire (mode reimage uniquement — révélé par app.js). Le reimage ne refait
+         plus que les tapisseries : jamais une toile ni un poster. -->
     <section class="card hidden" id="productCard">
-      <h2 class="card-title">1 · Produit à refaire</h2>
+      <h2 class="card-title">1 · Tapisserie à refaire</h2>
       <div class="field">
-        <label>Produit existant</label>
+        <label>Tapisserie existante</label>
         <div class="combo">
-          <input type="text" id="productSearch" placeholder="Rechercher un produit…" autocomplete="off">
+          <input type="text" id="productSearch" placeholder="Rechercher une tapisserie…" autocomplete="off">
           <div id="productList" class="combo-list hidden"></div>
         </div>
         <div id="productChosen" class="chosen hidden"></div>
@@ -75,8 +76,8 @@
     <section class="card" id="paramsCard">
       <h2 class="card-title">2 · Produit & collection</h2>
 
-      <!-- Pour le mode reimage (produit sans type) et le poster personnalisé. En création, le produit
-           se choisit au-dessus de l'image, et ce sélecteur reste caché (artwork-draft.js). -->
+      <!-- Visible pour le seul poster personnalisé, verrouillé. En création, le produit se choisit
+           au-dessus de l'image, et artwork-draft.js clique ce sélecteur caché ; jamais en reimage. -->
       <div class="seg" id="productType">
         <button class="seg-btn active" data-type="toile">Toile</button>
         <button class="seg-btn" data-type="poster">Poster</button>
